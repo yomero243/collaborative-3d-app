@@ -9,7 +9,7 @@ Una aplicación de Air Hockey en 3D que permite jugar en línea con otros usuari
 - Sistema colaborativo en tiempo real
 - Efectos visuales de movimiento
 - Sistema de colisiones realista
-
+v1
 ## Requisitos
 
 - Node.js 16 o superior

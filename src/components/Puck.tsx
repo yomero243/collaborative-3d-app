@@ -1,17 +1,18 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Sphere } from '@react-three/drei';
-import { useFrame, useThree } from '@react-three/fiber';
-import { PuckData } from '../hooks/useCollaborativeState'; // Asegúrate que la ruta es correcta
+import { useFrame } from '@react-three/fiber';
+import { PuckData } from '../components/Scene3D'; // Importar desde Scene3D
 import * as THREE from 'three';
 
 interface PuckProps {
   puckData: PuckData | null;
   radius?: number;
   color?: string;
+  showHitbox?: boolean;
 }
 
 // Componente para crear la estela visual del puck
-const PuckTrail: React.FC<{position: THREE.Vector3, color: string}> = ({ position, color }) => {
+const PuckTrail: React.FC<{position: THREE.Vector3, color: string, speed: number}> = ({ position, color, speed }) => {
   const particles = useRef<THREE.Points>(null);
   const particleCount = 10;
   const positions = useRef<number[]>([]);
@@ -61,7 +62,7 @@ const PuckTrail: React.FC<{position: THREE.Vector3, color: string}> = ({ positio
       </bufferGeometry>
       <pointsMaterial
         color={color}
-        size={0.1}
+        size={0.08 + (speed * 0.1)}
         sizeAttenuation={true}
         transparent={true}
         opacity={0.8}
@@ -74,109 +75,161 @@ const Puck: React.FC<PuckProps> = ({
   puckData,
   radius = 0.25,
   color = 'red',
+  showHitbox = true,
 }) => {
   const puckRef = useRef<THREE.Mesh>(null);
-  const { scene } = useThree();
-  const lastPos = useRef(new THREE.Vector3());
+  const hitboxRef = useRef<THREE.Mesh>(null);
+  const [lastCollision, setLastCollision] = useState(0);
+  const [collisionIntensity, setCollisionIntensity] = useState(0);
   
-  // Efecto para añadir sonido de colisión
+  // Posición a la que el puck visual debe moverse (viene de puckData)
+  const targetPosition = useRef(new THREE.Vector3());
+  // Posición usada por PuckTrail, actualizada con la posición visual actual del puck
+  const trailPosition = useRef(new THREE.Vector3()); 
+  // Velocidad actual para efectos visuales
+  const currentSpeed = useRef(0);
+
+  // Flag para saber si el puck visual ha sido colocado en su posición inicial
+  const isVisualPuckInitialized = useRef(false);
+  // Guardar la última posición para detectar cambios bruscos (colisiones)
+  const lastPositionRef = useRef(new THREE.Vector3());
+  // Guardar velocidad previa para detectar cambios bruscos
+  const lastVelocityRef = useRef(new THREE.Vector2());
+
+  const SNAP_THRESHOLD = radius * 5; 
+  const LERP_FACTOR = 0.2; 
+
+  // Efecto para actualizar targetPosition y manejar la inicialización visual
   useEffect(() => {
-    // Crear un listener de audio (solo se necesita uno por escena)
-    if (!scene.getObjectByName('audio-listener')) {
-      const listener = new THREE.AudioListener();
-      listener.name = 'audio-listener';
-      scene.add(listener);
-    }
-    
-    // Crear un sonido para las colisiones
-    if (puckRef.current) {
-      const sound = new THREE.PositionalAudio(
-        scene.getObjectByName('audio-listener') as THREE.AudioListener
-      );
+    if (puckData && puckData.position) {
+      const newPos = new THREE.Vector3(puckData.position.x, puckData.position.y, puckData.position.z);
       
-      // Cargar el sonido (lo intentamos, pero no bloqueamos si no existe)
-      try {
-        const audioLoader = new THREE.AudioLoader();
-        audioLoader.load('/sounds/hit.mp3', buffer => {
-          sound.setBuffer(buffer);
-          sound.setRefDistance(20);
-          sound.setVolume(0.5);
-        }, undefined, error => {
-          // Solo un log, no bloquea la app
-          console.log('Error cargando sonido:', error);
-        });
+      // Detectar colisiones basado en cambios bruscos de velocidad
+      if (isVisualPuckInitialized.current && puckRef.current) {
+        const oldVel = lastVelocityRef.current;
+        const newVel = new THREE.Vector2(puckData.velocity.x, puckData.velocity.z);
         
-        // Añadir el sonido al puck
-        puckRef.current.add(sound);
+        // Verificar si ha habido un cambio brusco en la velocidad (colisión)
+        const velDiff = oldVel.distanceTo(newVel);
+        const newSpeed = newVel.length();
+        const suddenChange = velDiff > 0.3 || newSpeed > 5.0; // Detectar también velocidades altas como colisiones
         
-        // Guardar referencia al sonido
-        const soundRef = sound;
+        if (suddenChange) {
+          // Calcular intensidad basada en la velocidad y el cambio
+          const intensidad = Math.max(
+            Math.min(1.0, velDiff * 0.5),
+            Math.min(1.0, newSpeed / 10.0)
+          );
+          setLastCollision(Date.now());
+          setCollisionIntensity(intensidad);
+        }
         
-        // Limpiar al desmontar
-        return () => {
-          if (puckRef.current) {
-            puckRef.current.remove(soundRef);
-          }
-        };
-      } catch (error) {
-        console.log('Error con el sistema de audio:', error);
+        // Actualizar velocidad guardada
+        lastVelocityRef.current.set(puckData.velocity.x, puckData.velocity.z);
+      }
+      
+      // Actualizar posición objetivo
+      targetPosition.current.copy(newPos);
+      
+      if (!isVisualPuckInitialized.current && puckRef.current) {
+        // Primera vez que tenemos datos válidos, o si se reinicializa,
+        // teletransportar el puck visual a la posición objetivo.
+        puckRef.current.position.copy(targetPosition.current);
+        trailPosition.current.copy(targetPosition.current); // Sincronizar la estela también
+        lastPositionRef.current.copy(targetPosition.current); // Guardar última posición
+        isVisualPuckInitialized.current = true;
+        puckRef.current.visible = true; // Asegurarse que esté visible
+      } else if (isVisualPuckInitialized.current && !puckRef.current?.visible) {
+        // Si ya estaba inicializado pero se ocultó, y vuelve a haber puckData
+        if(puckRef.current) puckRef.current.visible = true;
+      }
+    } else {
+      // Si puckData se vuelve null o no tiene posición, resetear el flag y ocultar.
+      isVisualPuckInitialized.current = false;
+      if (puckRef.current) {
+        puckRef.current.visible = false;
       }
     }
-  }, [scene]);
-  
-  // Actualizar la posición del puck y calcular velocidad
-  useFrame(() => {
-    if (!puckRef.current || !puckData) return;
+  }, [puckData]); // Depender del objeto puckData completo o de sus propiedades relevantes.
 
-    // Sincronizar la posición del mesh con puckData
-    puckRef.current.position.set(
-      puckData.position.x,
-      puckData.position.y,
-      puckData.position.z
-    );
+  useFrame((state, delta) => {
+    if (!puckRef.current || !puckData || !puckData.position || !isVisualPuckInitialized.current) {
+      return;
+    }
+
+    const distanceToTarget = puckRef.current.position.distanceTo(targetPosition.current);
+
+    if (distanceToTarget > SNAP_THRESHOLD) {
+      puckRef.current.position.copy(targetPosition.current);
+    } else if (distanceToTarget > 0.001) { 
+      puckRef.current.position.lerp(targetPosition.current, LERP_FACTOR);
+    }
+
+    trailPosition.current.copy(puckRef.current.position);
     
-    // Actualizar posición para el trail
-    lastPos.current.set(
-      puckData.position.x,
-      puckData.position.y,
-      puckData.position.z
-    );
+    // Sincronizar la posición del hitbox con la del puck en cada frame
+    if (hitboxRef.current && showHitbox) {
+      hitboxRef.current.position.copy(puckRef.current.position);
+    }
     
-    // Actualizar la rotación basada en la velocidad
     const speed = Math.sqrt(puckData.velocity.x * puckData.velocity.x + puckData.velocity.z * puckData.velocity.z);
+    currentSpeed.current = speed;
     
+    // Actualizar la rotación basada en la velocidad de puckData
     if (speed > 0.001) {
-      // Rotar el puck en función de la dirección de movimiento
       const angle = Math.atan2(puckData.velocity.z, puckData.velocity.x);
-      puckRef.current.rotation.y += speed * 2; // Girar sobre su eje
+      const rotationSpeedFactor = 1.5; 
+      puckRef.current.rotation.y += speed * rotationSpeedFactor * (60 * delta); 
+
+      const tiltFactor = 0.1;
+      puckRef.current.rotation.z = Math.sin(angle) * tiltFactor * speed;
+      puckRef.current.rotation.x = Math.cos(angle) * tiltFactor * speed;
+    } else {
+      puckRef.current.rotation.x = THREE.MathUtils.lerp(puckRef.current.rotation.x, 0, 0.1);
+      puckRef.current.rotation.z = THREE.MathUtils.lerp(puckRef.current.rotation.z, 0, 0.1);
+    }
+    
+    // Efecto de destello en colisiones
+    if (Date.now() - lastCollision < 500) {
+      const timeSinceCollision = (Date.now() - lastCollision) / 500; // Normalizado 0-1
+      const collisionFlash = 1 - timeSinceCollision; // Decrece con el tiempo
       
-      // Añadir un pequeño tilt en la dirección del movimiento
-      puckRef.current.rotation.z = Math.sin(angle) * 0.2 * speed;
-      puckRef.current.rotation.x = Math.cos(angle) * 0.2 * speed;
+      if (puckRef.current.material instanceof THREE.MeshStandardMaterial) {
+        puckRef.current.material.emissiveIntensity = 0.6 + collisionFlash * collisionIntensity * 3.0;
+      }
+    } else if (puckRef.current.material instanceof THREE.MeshStandardMaterial) {
+      puckRef.current.material.emissiveIntensity = 0.6;
     }
   });
 
-  if (!puckData) {
-    return null; // No renderizar si no hay datos del puck
-  }
-
   return (
     <>
-      {/* Estela visual del puck */}
-      <PuckTrail 
-        position={new THREE.Vector3(puckData.position.x, puckData.position.y, puckData.position.z)} 
-        color={color} 
-      />
+      {/* Estela visual del puck, siempre activa pero sigue a trailPosition */}
+      {/* trailPosition se actualiza incluso si el puck principal está oculto (se queda en el último sitio) */}
+      {/* o podrías condicionar el renderizado de PuckTrail también con isVisualPuckInitialized.current */}
+      {isVisualPuckInitialized.current && <PuckTrail 
+        position={trailPosition.current}
+        color={color}
+        speed={currentSpeed.current}
+      />}
       
-      {/* El puck */}
+      {/* Visualización de hitbox del puck */}
+      {showHitbox && isVisualPuckInitialized.current && (
+        <Sphere
+          ref={hitboxRef}
+          args={[radius, 16, 16]}
+          visible={true}
+        >
+          <meshBasicMaterial color="blue" wireframe={true} transparent opacity={0.5} />
+        </Sphere>
+      )}
+      
       <Sphere 
         ref={puckRef}
         args={[radius, 32, 32]} 
-        position={[
-          puckData.position.x, 
-          puckData.position.y, 
-          puckData.position.z
-        ]}
+        // La posición y visibilidad se manejan en los hooks.
+        // Podríamos inicializarlo como no visible para evitar un flash en (0,0,0).
+        visible={false} 
         castShadow
         receiveShadow
       >
@@ -186,19 +239,32 @@ const Puck: React.FC<PuckProps> = ({
           emissiveIntensity={0.6}
           roughness={0.3} 
           metalness={0.7}
+          transparent={showHitbox}
+          opacity={showHitbox ? 0.8 : 1}
         />
       </Sphere>
       
-      {/* Luz que sigue al puck */}
-      <pointLight
-        position={[puckData.position.x, puckData.position.y + 0.5, puckData.position.z]}
-        intensity={1}
-        distance={3}
-        color={color}
-        castShadow
-      />
+      {/* Luz que sigue al puck con intensidad basada en la velocidad */}
+      {isVisualPuckInitialized.current && puckRef.current && (
+        <pointLight
+          position={puckRef.current.position.clone().add(new THREE.Vector3(0, 0.5, 0))}
+          intensity={1 + currentSpeed.current}
+          distance={3 + currentSpeed.current * 4}
+          color={color}
+        />
+      )}
+      
+      {/* Efecto de explosión en colisiones fuertes */}
+      {isVisualPuckInitialized.current && puckRef.current && Date.now() - lastCollision < 300 && collisionIntensity > 0.3 && (
+        <pointLight
+          position={puckRef.current.position.clone()}
+          intensity={(1 - (Date.now() - lastCollision) / 300) * 8 * collisionIntensity}
+          distance={3 * collisionIntensity}
+          color="white"
+        />
+      )}
     </>
   );
 };
 
-export default Puck; 
+export default Puck;

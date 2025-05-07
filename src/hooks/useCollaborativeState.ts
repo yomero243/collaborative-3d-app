@@ -1,610 +1,552 @@
-import { useEffect, useState, useRef } from 'react';
+import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
-import { generateRandomColor } from '../utils/colors';
 
-// Interfaz para la posición de un objeto en el espacio 3D
-interface GameObjectPosition {
-  x: number;
-  y: number;
-  z: number;
+// --- Constantes de Configuración y Física (Monolítico) ---
+
+/** Radio del Puck en metros. */
+const PUCK_RADIUS = 0.25; // m - Actualizado para coincidir con la representación visual (0.25)
+/** Radio de la Paleta (Paddle) en metros. */
+const PADDLE_RADIUS = 0.5; // m - Actualizado para coincidir con la representación visual (0.5)
+/** Factor de fricción del Puck (0-1, más cercano a 1 menos fricción). */
+const PUCK_FRICTION = 0.995; // Aumentado para simular mejor el deslizamiento sobre aire
+/** Coeficiente de restitución contra las paredes (0-1). */
+const WALL_BOUNCE_FACTOR = 0.85; // Ligeramente aumentado para rebotes más enérgicos
+/** Coeficiente de restitución contra las paletas (0-inf). */
+const PADDLE_BOUNCINESS = 1.3; // Aumentado para que los golpes sean más potentes
+/** Velocidad mínima para considerar el puck detenido (m/s). */
+const MIN_SPEED_THRESHOLD = 0.005; // m/s - Reducido para que el puck no se detenga tan rápido
+
+// Límites de la mesa (ejemplo, ajusta a tu escena 3D)
+// Asumimos que el origen (0,0) es el centro de la mesa.
+/** Límite X mínimo de la mesa en metros. */
+const TABLE_MIN_X = -5; // m - Actualizado para coincidir con TABLE_WIDTH (10m)
+/** Límite X máximo de la mesa en metros. */
+const TABLE_MAX_X = 5;  // m - Actualizado para coincidir con TABLE_WIDTH (10m) 
+/** Límite Y mínimo de la mesa (o Z en tu caso, si es horizontal) en metros. */
+const TABLE_MIN_Y = -3; // m - Actualizado para coincidir con TABLE_DEPTH (6m)
+/** Límite Y máximo de la mesa en metros. */
+const TABLE_MAX_Y = 3;  // m - Actualizado para coincidir con TABLE_DEPTH (6m)
+
+/** Clave persistente para almacenar el UUID del usuario generado. */
+const USER_ID_KEY = 'collab3d-userId';
+/** Clave para el token JWT (conceptual). */
+const JWT_TOKEN_KEY = 'authToken'; // Conceptual, la lógica de getAuthToken la usa.
+
+// --- Funciones de Ayuda ---
+
+/**
+ * Recupera o genera un UUID persistente para el usuario actual.
+ * @returns {string} El UUID del usuario.
+ */
+function getUserId(): string {
+  let id = localStorage.getItem(USER_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(USER_ID_KEY, id);
+  }
+  return id;
 }
 
-// Interfaz para los datos de un usuario (paddle)
+/**
+ * Recupera el token JWT (conceptual) del almacenamiento.
+ * @returns {string | null} El token o null si no se encuentra.
+ */
+function getAuthToken(): string | null {
+  return localStorage.getItem(JWT_TOKEN_KEY);
+}
+
+// --- Tipos de Datos ---
+
+/**
+ * Forma de los datos para un usuario remoto en el juego.
+ * Las coordenadas están en metros.
+ */
 export interface UserData {
   id: string;
-  name: string;
+  /** Posición X del usuario (centro de la paleta) en metros. */
+  x: number;
+  /** Posición Y del usuario (centro de la paleta) en metros. */
+  y: number; // En un plano 2D. Si tu juego es 3D con paletas en Y=constante, esto podría ser Z.
+  /** Color del usuario en formato hexadecimal. */
   color: string;
-  position: GameObjectPosition;
-  score: number;
 }
 
-// Interfaz para los datos del puck
-export interface PuckData {
-  position: GameObjectPosition;
-  velocity: { x: number; z: number };
+/**
+ * Forma de los datos para el estado del puck.
+ * Coordenadas en metros, velocidades en metros/segundo.
+ */
+export interface PuckState {
+  /** Posición X del puck en metros. */
+  x: number;
+  /** Posición Y del puck en metros. */
+  y: number;
+  /** Velocidad X del puck en metros/segundo. */
+  vx: number;
+  /** Velocidad Y del puck en metros/segundo. */
+  vy: number;
 }
 
-// Interfaz para el estado compartido entre usuarios
-interface CollaborativeState {
-  users: Map<string, UserData>;
-  currentUser: UserData | null;
-  puck: PuckData | null;
-  updateUserPosition: (position: GameObjectPosition) => void;
-  setUserName: (name: string) => void;
-  resetPuck: () => void;
-  applyImpulseToPuck: (impulseX: number, impulseZ: number) => void;
+
+// --- Lógica de Física del Puck (Monolítico) ---
+
+/**
+ * Calcula el siguiente estado del puck basándose en su estado actual, las paletas y el delta de tiempo.
+ * Esta es una función pura.
+ * @param {PuckState} currentPuck El estado actual del puck.
+ * @param {UserData[]} users Array de todos los usuarios (paletas).
+ * @param {number} dt Delta de tiempo en segundos (ej., 1/60 para 60Hz).
+ * @returns {PuckState} El nuevo estado calculado del puck.
+ */
+function computeNextPuckState(
+  currentPuck: PuckState,
+  users: UserData[],
+  dt: number
+): PuckState {
+  let { x, y, vx, vy } = currentPuck;
+
+  // 1. Aplicar velocidad actual para obtener nueva posición tentativa
+  x += vx * dt;
+  y += vy * dt;
+
+  // 2. Aplicar fricción a las velocidades - simulando rozamiento en mesa de air hockey
+  vx *= PUCK_FRICTION;
+  vy *= PUCK_FRICTION;
+
+  // 3. Detener el puck si la velocidad es muy baja
+  if (Math.sqrt(vx * vx + vy * vy) < MIN_SPEED_THRESHOLD) {
+    vx = 0;
+    vy = 0;
+  }
+
+  // 4. Detección de colisiones con las paredes y rebote
+  // Colisión con paredes verticales (izquierda/derecha)
+  if (x - PUCK_RADIUS < TABLE_MIN_X) {
+    x = TABLE_MIN_X + PUCK_RADIUS;
+    vx = -vx * WALL_BOUNCE_FACTOR;
+  } else if (x + PUCK_RADIUS > TABLE_MAX_X) {
+    x = TABLE_MAX_X - PUCK_RADIUS;
+    vx = -vx * WALL_BOUNCE_FACTOR;
+  }
+
+  // Colisión con paredes horizontales (arriba/abajo)
+  if (y - PUCK_RADIUS < TABLE_MIN_Y) {
+    y = TABLE_MIN_Y + PUCK_RADIUS;
+    vy = -vy * WALL_BOUNCE_FACTOR;
+    // Aquí podría ir la lógica de gol si TABLE_MIN_Y es una portería
+  } else if (y + PUCK_RADIUS > TABLE_MAX_Y) {
+    y = TABLE_MAX_Y - PUCK_RADIUS;
+    vy = -vy * WALL_BOUNCE_FACTOR;
+    // Aquí podría ir la lógica de gol si TABLE_MAX_Y es una portería
+  }
+
+  // 5. Detección de colisiones con las paletas (usuarios)
+  for (const user of users) {
+    const dx = x - user.x; // Distancia en x entre centros del puck y la paleta
+    const dy = y - user.y; // Distancia en y entre centros
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const sumRadii = PUCK_RADIUS + PADDLE_RADIUS;
+
+    if (distance < sumRadii) { // Hay colisión
+      console.log(`[Colisión] Paddle-Puck detectada: distancia=${distance.toFixed(2)}, sumRadii=${sumRadii}`);
+      
+      // Calcular normal de colisión (vector unitario desde la paleta al puck)
+      const nx = dx / distance;
+      const ny = dy / distance;
+
+      // Separar los objetos para evitar superposición
+      const overlap = sumRadii - distance;
+      x += nx * overlap * 1.01; // Mover puck con mayor separación para evitar pegarse
+      
+      // Calcular velocidad relativa
+      const rvx = vx; // Asumimos que la paleta está quieta para simplificar
+      const rvy = vy;
+
+      // Calcular velocidad relativa a lo largo de la normal
+      const velAlongNormal = rvx * nx + rvy * ny;
+
+      // No procesar si las velocidades ya se están separando
+      if (velAlongNormal > 0) {
+        // Aún así, asegurar que estén separados lo suficiente
+        continue;
+      }
+
+      // Calcular impulso (j) con rebote mejorado para air hockey
+      const j = -(1 + PADDLE_BOUNCINESS) * velAlongNormal;
+
+      // Aplicar impulso base
+      vx += j * nx;
+      vy += j * ny;
+      
+      // Añadir un impulso mínimo en la dirección de la normal para evitar que el puck quede pegado
+      // Esto es especialmente importante en air hockey donde el puck debe seguir moviéndose
+      const minImpulse = 0.3; // Aumentado para air hockey
+      const currentSpeed = Math.sqrt(vx * vx + vy * vy);
+      
+      if (currentSpeed < minImpulse) {
+        // Si la velocidad resultante es muy baja, asegurar un impulso mínimo
+        vx = nx * minImpulse * 1.8; // Más fuerte para air hockey
+        vy = ny * minImpulse * 1.8;
+        console.log(`[Rebote] Aplicando impulso mínimo: vx=${vx.toFixed(2)}, vy=${vy.toFixed(2)}`);
+      }
+      
+      // Para air hockey, añadimos un poco de variación a la dirección
+      // para que no sea demasiado predecible
+      const randomVariation = 0.05; // 5% de variación
+      vx += vx * (Math.random() * 2 - 1) * randomVariation;
+      vy += vy * (Math.random() * 2 - 1) * randomVariation;
+    }
+  }
+
+  // Limitar la velocidad máxima del puck para air hockey
+  const maxSpeed = 10.0; // m/s - Velocidad máxima para air hockey
+  const currentSpeed = Math.sqrt(vx * vx + vy * vy);
+  if (currentSpeed > maxSpeed) {
+    const reduction = maxSpeed / currentSpeed;
+    vx *= reduction;
+    vy *= reduction;
+  }
+
+  return { x, y, vx, vy };
 }
 
-// Constantes para la dimensión de la mesa
-const TABLE_WIDTH = 10;
-const TABLE_HEIGHT = 0.2;
-const TABLE_DEPTH = 6;
-const PADDLE_RADIUS = 0.5;
-const PUCK_RADIUS = 0.25;
-const PUCK_HEIGHT = TABLE_HEIGHT / 2 + PUCK_RADIUS;
 
-// Constantes de Física
-// const FRICTION = 0.98; // No se usa directamente aquí, se usará PUCK_FRICTION
-const WALL_BOUNCE_FACTOR = 0.75; // Factor de rebote en las paredes (0 a 1)
-const PADDLE_BOUNCINESS = 1.4; // Aumentado para golpes más fuertes (antes 1.2)
-const PUCK_FRICTION = 0.99; // Factor de fricción (ej. 0.99 reduce velocidad 1% por frame)
-const MINIMUM_PUCK_SPEED = 0.01; // Velocidad por debajo de la cual el puck se considera detenido
+// --- Hooks de Suscripción a Yjs (useSyncExternalStore) ---
 
-// Funciones Auxiliares
-// updatePuckPhysics se moverá dentro del hook
+/**
+ * Hook para suscribirse a un Y.Map y devolver sus valores como un array.
+ */
+function useYMapValuesAsArray<T>(yMap: Y.Map<T> | undefined): T[] {
+  // Usamos un ref para mantener el último snapshot y prevenir el warning
+  // de "The result of getSnapshot should be cached"
+  const lastSnapshotRef = useRef<T[]>([]);
 
-// Hook para manejar el estado colaborativo
-export const useCollaborativeState = (): CollaborativeState => {
-  const [users, setUsers] = useState<Map<string, UserData>>(new Map());
-  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
-  const [puck, setPuck] = useState<PuckData | null>(null);
+  const getSnapshot = useCallback(() => {
+    if (!yMap) return lastSnapshotRef.current;
+    
+    // Crear una copia del array de valores
+    const newSnapshot = Array.from(yMap.values()) as T[];
+    
+    // Solo actualizar la referencia si el contenido ha cambiado
+    // Esto es una comparación simplificada, podría necesitar una comparación más profunda
+    // dependiendo de la complejidad de T
+    if (newSnapshot.length !== lastSnapshotRef.current.length) {
+      lastSnapshotRef.current = newSnapshot;
+    }
+    
+    return lastSnapshotRef.current;
+  }, [yMap]);
   
-  const ydocRef = useRef<Y.Doc>(new Y.Doc());
-  const providerRef = useRef<WebsocketProvider | null>(null);
-  const sharedUsersRef = useRef<Y.Map<unknown>>(ydocRef.current.getMap('users'));
-  const sharedPuckRef = useRef<Y.Map<unknown>>(ydocRef.current.getMap('puck'));
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    if (!yMap) return () => {};
+    const handler = () => onStoreChange();
+    yMap.observe(handler);
+    return () => yMap.unobserve(handler);
+  }, [yMap]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/**
+ * Hook para suscribirse a una entrada específica en un Y.Map.
+ */
+function useYMapEntry<T>(yMap: Y.Map<unknown> | undefined, entryKey: string): T | null {
+  // Usar un ref para mantener el último valor y evitar el warning de "getSnapshot should be cached"
+  const lastValueRef = useRef<T | null>(null);
   
-  const yjsSetupDoneRef = useRef(false);
-  const localUserSetupDoneRef = useRef(false);
+  const getSnapshot = useCallback(() => {
+    if (!yMap) return lastValueRef.current;
+    
+    const newValue = (yMap.get(entryKey) as T) || null;
+    
+    // Solo actualizar la referencia si el valor ha cambiado
+    // Esta comparación puede no ser suficiente para objetos complejos
+    if (newValue !== lastValueRef.current) {
+      lastValueRef.current = newValue;
+    }
+    
+    return lastValueRef.current;
+  }, [yMap, entryKey]);
+
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    if (!yMap) return () => {};
+    const handler = (event: Y.YMapEvent<unknown>) => {
+      if (event.keysChanged.has(entryKey)) onStoreChange();
+    };
+    yMap.observe(handler);
+    return () => yMap.unobserve(handler);
+  }, [yMap, entryKey]);
+  
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+
+// --- Hook Principal: useCollaborativeState ---
+
+/**
+ * Hook principal para el estado colaborativo: usuarios, puck, e ID de usuario propio.
+ * Gestiona el documento Yjs, WebsocketProvider, y suscripciones a datos compartidos.
+ * Incluye la lógica de física del puck y su actualización.
+ *
+ * @param {string} [roomName="default-room"] El nombre de la sala de colaboración.
+ * @param {string} [serverUrl="ws://localhost:1234"] La URL del servidor WebSocket.
+ * @returns {{
+ *   users: UserData[];
+ *   puck: PuckState | null;
+ *   userId: string;
+ *   yDoc: Y.Doc | undefined;
+ *   updateCurrentUserPosition: (pos: { x: number; y: number }) => void;
+ *   applyImpulseToPuck: (vx: number, vy: number) => void; // Para interacciones directas si es necesario
+ * }}
+ */
+export function useCollaborativeState(
+  roomName: string = "default-room",
+  serverUrl: string = "ws://localhost:1234"
+): {
+  users: UserData[];
+  puck: PuckState | null;
+  userId: string;
+  yDoc: Y.Doc | undefined;
+  updateCurrentUserPosition: (pos: { x: number; y: number }) => void;
+  applyImpulseToPuck: (vx: number, vy: number) => void;
+} {
+  const userId = useRef(getUserId()).current;
+  
+  const ydocRef = useRef<Y.Doc>();
+  const providerRef = useRef<WebsocketProvider>();
+  const usersMapRef = useRef<Y.Map<UserData>>();
+  const puckMapRef = useRef<Y.Map<unknown>>(); // Usar unknown en lugar de any
   const physicsIntervalRef = useRef<number | null>(null);
+  const hasLoggedErrorRef = useRef(false);
 
-  // Función para aplicar un impulso al puck (por ejemplo, cuando un paddle lo golpea)
-  // Esta función es definida ANTES de updatePuckPhysics para que esté disponible en su scope.
-  const applyImpulseToPuck = (impulseX: number, impulseZ: number) => {
-    if (!providerRef.current?.wsconnected || !puck) return;
-    
-    const currentPos = { ...puck.position };
-    let currentImpulseX = impulseX;
-    let currentImpulseZ = impulseZ;
-
-    let newPosX = currentPos.x + currentImpulseX;
-    let newPosZ = currentPos.z + currentImpulseZ;
-    
-    // Colisiones con paredes y rebote
-    if (newPosX > TABLE_WIDTH / 2 - PUCK_RADIUS) {
-      newPosX = TABLE_WIDTH / 2 - PUCK_RADIUS;
-      currentImpulseX *= -WALL_BOUNCE_FACTOR; // Invertir y aplicar rebote
-    } else if (newPosX < -TABLE_WIDTH / 2 + PUCK_RADIUS) {
-      newPosX = -TABLE_WIDTH / 2 + PUCK_RADIUS;
-      currentImpulseX *= -WALL_BOUNCE_FACTOR; // Invertir y aplicar rebote
-    }
-
-    if (newPosZ > TABLE_DEPTH / 2 - PUCK_RADIUS) {
-      newPosZ = TABLE_DEPTH / 2 - PUCK_RADIUS;
-      currentImpulseZ *= -WALL_BOUNCE_FACTOR; // Invertir y aplicar rebote
-    } else if (newPosZ < -TABLE_DEPTH / 2 + PUCK_RADIUS) {
-      newPosZ = -TABLE_DEPTH / 2 + PUCK_RADIUS;
-      currentImpulseZ *= -WALL_BOUNCE_FACTOR; // Invertir y aplicar rebote
-    }
-    
-    const newPosition = { x: newPosX, y: puck.position.y, z: newPosZ };
-    // La "velocidad" ahora refleja el impulso después del posible rebote en la pared.
-    const newVelocity = { x: currentImpulseX, z: currentImpulseZ };
-
-    setPuck({
-      position: newPosition,
-      velocity: newVelocity 
-    });
-    
-    const sharedPuck = sharedPuckRef.current;
-    const posMap = sharedPuck.get('position');
-    const velMap = sharedPuck.get('velocity');
-    
-    if (posMap instanceof Y.Map && velMap instanceof Y.Map) {
-      ydocRef.current.transact(() => {
-        posMap.set('x', newPosition.x);
-        posMap.set('y', newPosition.y);
-        posMap.set('z', newPosition.z);
-        velMap.set('x', newVelocity.x); // Guardar el impulso como velocidad
-        velMap.set('z', newVelocity.z);
-      });
-    }
-  };
-
-
-  /**
-   * Calcula colisiones del puck con paddles y aplica impulsos.
-   * Esta función ahora está DENTRO de useCollaborativeState para acceder a applyImpulseToPuck.
-   */
-  const updatePuckPhysicsInternal = () => {
-    const currentSharedPuck = sharedPuckRef.current;
-    const currentSharedUsersMap = sharedUsersRef.current;
-
-    if (!(currentSharedPuck instanceof Y.Map) || !puck) { // Añadido check para puck state
-      return;
-    }
-
-    const puckPosMap = currentSharedPuck.get('position');
-    const puckVelMap = currentSharedPuck.get('velocity');
-
-    if (!(puckPosMap instanceof Y.Map) || !(puckVelMap instanceof Y.Map)) {
-      return;
-    }
-
-    let currentPuckVelX = puckVelMap.get('x') as number || 0;
-    let currentPuckVelZ = puckVelMap.get('z') as number || 0;
-    const currentPuckPosX = puckPosMap.get('x') as number || 0;
-    const currentPuckPosY = puckPosMap.get('y') as number || PUCK_HEIGHT;
-    const currentPuckPosZ = puckPosMap.get('z') as number || 0;
-
-    let puckSpeedChangedByFriction = false;
-
-    // 1. Aplicar Fricción
-    if (Math.abs(currentPuckVelX) > 0 || Math.abs(currentPuckVelZ) > 0) {
-      currentPuckVelX *= PUCK_FRICTION;
-      currentPuckVelZ *= PUCK_FRICTION;
-
-      const speed = Math.sqrt(currentPuckVelX * currentPuckVelX + currentPuckVelZ * currentPuckVelZ);
-      if (speed < MINIMUM_PUCK_SPEED) {
-        currentPuckVelX = 0;
-        currentPuckVelZ = 0;
-      }
-      puckSpeedChangedByFriction = true;
-    }
-
-    // 2. Calcular nueva posición basada en velocidad (afectada por fricción)
-    // Esta posición solo se usará si no hay colisión con paddle, 
-    // o para la detección de colisión con paddle.
-    let nextPuckPosX = currentPuckPosX + currentPuckVelX;
-    let nextPuckPosZ = currentPuckPosZ + currentPuckVelZ;
-
-    // Colisiones con paredes (manejadas por applyImpulseToPuck si hay un *nuevo* impulso).
-    // Aquí solo nos aseguramos de que la posición por fricción no atraviese las paredes.
-    // Esta es una comprobación simple, applyImpulseToPuck tiene la lógica de rebote.
-    if (nextPuckPosX > TABLE_WIDTH / 2 - PUCK_RADIUS) { nextPuckPosX = TABLE_WIDTH / 2 - PUCK_RADIUS; currentPuckVelX = 0;}
-    else if (nextPuckPosX < -TABLE_WIDTH / 2 + PUCK_RADIUS) { nextPuckPosX = -TABLE_WIDTH / 2 + PUCK_RADIUS; currentPuckVelX = 0; }
-    if (nextPuckPosZ > TABLE_DEPTH / 2 - PUCK_RADIUS) { nextPuckPosZ = TABLE_DEPTH / 2 - PUCK_RADIUS; currentPuckVelZ = 0; }
-    else if (nextPuckPosZ < -TABLE_DEPTH / 2 + PUCK_RADIUS) { nextPuckPosZ = -TABLE_DEPTH / 2 + PUCK_RADIUS; currentPuckVelZ = 0; }
-    
-
-    // 3. Detección de Colisiones con Paddles
-    const currentUsersData = new Map<string, UserData>();
-    if (currentSharedUsersMap instanceof Y.Map) {
-      currentSharedUsersMap.forEach((userDataYMap: unknown, id: string) => {
-        if (userDataYMap instanceof Y.Map) {
-          const posMap = userDataYMap.get('position');
-          let userYPosition = PADDLE_RADIUS + TABLE_HEIGHT / 2;
-          if (posMap instanceof Y.Map && typeof posMap.get('y') === 'number') {
-            userYPosition = posMap.get('y') as number;
-          }
-          let position: GameObjectPosition = { x: 0, y: userYPosition, z: 0 };
-          if (posMap instanceof Y.Map) {
-            position = {
-              x: posMap.get('x') as number || 0,
-              y: userYPosition,
-              z: posMap.get('z') as number || 0,
-            };
-          }
-          currentUsersData.set(id, {
-            id: id,
-            name: userDataYMap.get('name') as string || 'Usuario',
-            color: userDataYMap.get('color') as string || '#cccccc',
-            score: userDataYMap.get('score') as number || 0,
-            position: position,
-          });
-        }
-      });
-    }
-
-    let paddleCollisionOccurred = false;
-    currentUsersData.forEach((user) => {
-      if (paddleCollisionOccurred) return; // Procesar solo una colisión de paddle por frame para simplificar
-
-      // Usar nextPuckPosX/Z para la detección, ya que es donde estaría el puck después de la fricción/movimiento de este frame.
-      const dx = nextPuckPosX - user.position.x;
-      const dz = nextPuckPosZ - user.position.z;
-      const distance = Math.sqrt(dx * dx + dz * dz);
-
-      if (distance < PUCK_RADIUS + PADDLE_RADIUS) {
-        paddleCollisionOccurred = true;
-        // console.log(`[PhysicsEngine] Colisión detectada con ${user.name}! Dist: ${distance.toFixed(2)}`);
-
-        const nx = dx / distance;
-        const nz = dz / distance;
-        const dotProduct = currentPuckVelX * nx + currentPuckVelZ * nz;
-
-        let impulseX = (currentPuckVelX - 2 * dotProduct * nx) * PADDLE_BOUNCINESS;
-        let impulseZ = (currentPuckVelZ - 2 * dotProduct * nz) * PADDLE_BOUNCINESS;
-        
-        // Ajuste para asegurar separación y evitar que el puck se "pegue" o atraviese lentamente.
-        // Si el puck no se está moviendo claramente hacia el paddle (dotProduct >= 0) 
-        // O si el producto escalar es negativo pero muy pequeño (casi tangencial o el paddle lo alcanza por detrás suavemente),
-        // queremos asegurarnos de que haya un impulso de separación claro.
-        const minSeparationImpulseBase = 0.15; // Aumentado (antes 0.1)
-        if (dotProduct >= -0.05) { // Condición relajada (antes -0.01), para aplicar más consistentemente el empuje de separación
-            if (dotProduct < 0) { // Moviéndose hacia el paddle
-              const reflectionMagnitude = Math.sqrt(impulseX*impulseX + impulseZ*impulseZ);
-              if (reflectionMagnitude < minSeparationImpulseBase) {
-                // El impulso de reflexión es muy débil, asegurar un impulso de salida mínimo.
-                impulseX = nx * minSeparationImpulseBase * PADDLE_BOUNCINESS;
-                impulseZ = nz * minSeparationImpulseBase * PADDLE_BOUNCINESS;
-              }
-            } else { // dotProduct >= 0 (Puck quieto relativo al paddle o moviéndose en paralelo/alejándose pero aún en contacto)
-              // Aplicamos un impulso de separación directo.
-              impulseX = nx * minSeparationImpulseBase * PADDLE_BOUNCINESS;
-              impulseZ = nz * minSeparationImpulseBase * PADDLE_BOUNCINESS;
-            }
-        }
-
-        const maxImpulse = 1.5;
-        const currentImpulseMagnitude = Math.sqrt(impulseX * impulseX + impulseZ * impulseZ);
-        if (currentImpulseMagnitude > maxImpulse) {
-          const scale = maxImpulse / currentImpulseMagnitude;
-          impulseX *= scale;
-          impulseZ *= scale;
-        }
-        
-        const minEffectiveImpulse = 0.05;
-        if (currentImpulseMagnitude < minEffectiveImpulse && currentImpulseMagnitude > 1e-5) {
-            const scaleFactor = minEffectiveImpulse / currentImpulseMagnitude;
-            impulseX *= scaleFactor;
-            impulseZ *= scaleFactor;
-        } else if (currentImpulseMagnitude <= 1e-5 && distance < PUCK_RADIUS + PADDLE_RADIUS - 0.01) {
-            impulseX = nx * minSeparationImpulseBase * PADDLE_BOUNCINESS;
-            impulseZ = nz * minSeparationImpulseBase * PADDLE_BOUNCINESS;
-        }
-        // console.log(`[PhysicsEngine] Aplicando impulso por paddle: (${impulseX.toFixed(3)}, ${impulseZ.toFixed(3)})`);
-        applyImpulseToPuck(impulseX, impulseZ);
-      }
-    });
-
-    // 4. Actualizar estado del puck si no hubo colisión con paddle PERO sí hubo cambio por fricción
-    if (!paddleCollisionOccurred && puckSpeedChangedByFriction) {
-      // console.log(`[PhysicsEngine] Aplicando fricción. Nueva Vel: (${currentPuckVelX.toFixed(3)}, ${currentPuckVelZ.toFixed(3)})`);
-      setPuck({
-        position: { x: nextPuckPosX, y: currentPuckPosY, z: nextPuckPosZ },
-        velocity: { x: currentPuckVelX, z: currentPuckVelZ }
-      });
-
-      // Actualizar Yjs también
-      ydocRef.current.transact(() => {
-        puckPosMap.set('x', nextPuckPosX);
-        puckPosMap.set('y', currentPuckPosY); // Mantener y
-        puckPosMap.set('z', nextPuckPosZ);
-        puckVelMap.set('x', currentPuckVelX);
-        puckVelMap.set('z', currentPuckVelZ);
-      });
-    }
-  };
-
-  // Efecto 1: Inicializar Yjs connection y observers
+  // Efecto para configurar Yjs, WebsocketProvider, y datos iniciales.
   useEffect(() => {
-    const setupYjs = () => {
-      try {
-        // Intentar crear el provider si no existe
-        if (!providerRef.current) {
-          const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const wsHost = window.location.hostname === 'localhost' ? 'localhost:1234' : window.location.host;
-          const wsUrl = `${wsProtocol}//${wsHost}`;
-          providerRef.current = new WebsocketProvider(wsUrl, 'air-hockey-room', ydocRef.current);
-          
-          providerRef.current.on('status', (event: { status: string }) => {
-            console.log(`[Yjs] Connection Status: ${event.status}`);
-          });
-        }
-        
-        // Setup de observadores
-        if (!yjsSetupDoneRef.current) {
-          setupYjsObservers();
-          yjsSetupDoneRef.current = true;
-        }
-      } catch (error) {
-        console.error("[Yjs] Error setting up Yjs:", error);
+    try {
+      // Validar params
+      if (!roomName || typeof roomName !== 'string') {
+        throw new Error(`roomName debe ser un string válido, recibido: ${roomName}`);
       }
-    };
-    
-    const setupYjsObservers = () => {
-      // Observer para el mapa de usuarios
-      const sharedUsers = sharedUsersRef.current;
+      if (!serverUrl || typeof serverUrl !== 'string') {
+        throw new Error(`serverUrl debe ser un string válido, recibido: ${serverUrl}`);
+      }
+
+      console.log(`[Yjs] Inicializando con roomName: "${roomName}", serverUrl: "${serverUrl}"`);
       
-      // Función para procesar actualizaciones de usuarios
-      const handleUserUpdate = () => {
-        const updatedUsers = new Map<string, UserData>();
+      // Crear Y.Doc
+      const doc = new Y.Doc();
+      ydocRef.current = doc;
+      
+      // Obtener mapas
+      usersMapRef.current = doc.getMap<UserData>('users');
+      puckMapRef.current = doc.getMap('puck') as Y.Map<unknown>; 
+
+      // Obtener token (si está disponible)
+      const token = getAuthToken();
+
+      try {
+        // Crear WebsocketProvider con manejo de errores explícito
+        const provider = new WebsocketProvider(
+          serverUrl,
+          roomName,
+          doc,
+          token ? { params: { token } } : undefined
+        );
         
-        if (sharedUsers instanceof Y.Map) {
-          sharedUsers.forEach((userDataYMap: unknown, id: string) => {
-            if (userDataYMap instanceof Y.Map) {
-              // Extraer posición del mapa
-              const posMap = userDataYMap.get('position');
-              let position: GameObjectPosition = { x: 0, y: 1, z: 0 };
-              
-              if (posMap instanceof Y.Map) {
-                position = {
-                  x: posMap.get('x') as number,
-                  y: posMap.get('y') as number,
-                  z: posMap.get('z') as number,
-                };
-              }
-              
-              const userData: UserData = {
-                id: id,
-                name: userDataYMap.get('name') as string,
-                color: userDataYMap.get('color') as string,
-                position: position,
-                score: userDataYMap.get('score') as number || 0,
-              };
-              
-              updatedUsers.set(id, userData);
-              
-              // Si es nuestro usuario, actualizar currentUser
-              if (currentUser && id === currentUser.id) {
-                setCurrentUser(userData);
-              }
-            }
-          });
+        providerRef.current = provider;
+        
+        provider.on('status', (event: { status: string }) => {
+          console.log(`[Yjs] Provider Status: ${event.status}`);
+        });
+        
+        provider.on('connection-error', (event: Error) => {
+          console.error('[Yjs] Connection error:', event);
+        });
+      } catch (providerError) {
+        if (!hasLoggedErrorRef.current) {
+          console.error('[Yjs] Error creando WebsocketProvider:', providerError);
+          console.error(`[Yjs] Comprueba que serverUrl (${serverUrl}) y roomName (${roomName}) sean válidos`);
+          console.error('[Yjs] Nota: Si usas localhost en un entorno seguro (HTTPS), cambia a wss:// o usa una URL segura');
+          hasLoggedErrorRef.current = true;
         }
-        
-        setUsers(updatedUsers);
+        throw providerError;
+      }
+
+      // Datos iniciales del usuario
+      const initialUserData: UserData = { 
+        id: userId, 
+        x: (Math.random() - 0.5) * TABLE_MAX_X, // Posición X aleatoria dentro de los límites
+        y: TABLE_MIN_Y + PADDLE_RADIUS + 0.5, // Posición Y cerca del borde inferior con espacio suficiente
+        color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}` 
       };
+      usersMapRef.current.set(userId, initialUserData);
       
-      // Observer para el puck
-      const handlePuckUpdate = () => {
-        const sharedPuck = sharedPuckRef.current;
-        
-        if (sharedPuck instanceof Y.Map) {
-          const posMap = sharedPuck.get('position');
-          const velMap = sharedPuck.get('velocity');
-          
-          if (posMap instanceof Y.Map && velMap instanceof Y.Map) {
-            const updatedPuck: PuckData = {
-              position: {
-                x: posMap.get('x') as number || 0,
-                y: posMap.get('y') as number || PUCK_HEIGHT,
-                z: posMap.get('z') as number || 0,
-              },
-              velocity: {
-                x: velMap.get('x') as number || 0,
-                z: velMap.get('z') as number || 0,
-              },
-            };
-            
-            setPuck(updatedPuck);
-          }
-        }
-      };
+      // Inicializar puck si no existe
+      if (puckMapRef.current.get('state') === undefined) {
+        puckMapRef.current.set('state', { x: 0, y: 0, vx: 0, vy: 0 });
+      }
       
-      // Registrar los observers
-      sharedUsers.observe(handleUserUpdate);
-      sharedPuckRef.current.observe(handlePuckUpdate);
-      
-      // Realizar una llamada inicial para establecer el estado
-      handleUserUpdate();
-      handlePuckUpdate();
-    };
-    
-    setupYjs();
-    
+    } catch (err) {
+      if (!hasLoggedErrorRef.current) {
+        console.error('[Yjs] Error en useEffect de inicialización:', err);
+        hasLoggedErrorRef.current = true;
+      }
+    }
+  
+    // Limpieza al desmontar o cambiar dependencias
     return () => {
+      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
       if (providerRef.current) {
         providerRef.current.disconnect();
-        providerRef.current = null;
+        providerRef.current.destroy();
       }
-    };
-  }, [currentUser]);
-  
-  // Efecto 2: Crear usuario cuando tenemos conexión
-  useEffect(() => {
-    if (!providerRef.current?.wsconnected || localUserSetupDoneRef.current) {
-      return;
-    }
-    
-    const sharedUsers = sharedUsersRef.current;
-    
-    // Generar ID de usuario
-    const userId = ydocRef.current.clientID.toString();
-    
-    // Comprobar si existe el usuario o crear nuevo
-    if (!sharedUsers.has(userId)) {
-      // Crear nuevo usuario
-      const savedName = localStorage.getItem('userName') || `Jugador-${Math.floor(Math.random() * 1000)}`;
-      const color = generateRandomColor();
+      if (ydocRef.current) ydocRef.current.destroy();
       
-      // Posición inicial del usuario
-      const initialX = (Math.random() - 0.5) * TABLE_WIDTH * 0.8;
-      const initialZ = (Math.random() - 0.5) * TABLE_DEPTH * 0.8;
-
-      const posMap = new Y.Map();
-      posMap.set('x', initialX);
-      posMap.set('y', PADDLE_RADIUS + TABLE_HEIGHT / 2); // Altura del paddle
-      posMap.set('z', initialZ);
-      
-      const userMap = new Y.Map();
-      userMap.set('name', savedName);
-      userMap.set('color', color);
-      userMap.set('position', posMap);
-      userMap.set('score', 0);
-      
-      // Añadir al mapa compartido
-      ydocRef.current.transact(() => {
-        sharedUsers.set(userId, userMap);
-      });
-      
-      // Actualizar estado local
-      const userData: UserData = {
-        id: userId,
-        name: savedName,
-        color: color,
-        position: { x: initialX, y: PADDLE_RADIUS + TABLE_HEIGHT / 2, z: initialZ },
-        score: 0,
-      };
-      
-      setCurrentUser(userData);
-      localUserSetupDoneRef.current = true;
-    }
-  }, [providerRef.current?.wsconnected]);
-  
-  // Efecto 3: Inicializar puck cuando tenemos conexión
-  useEffect(() => {
-    if (!providerRef.current?.wsconnected || !currentUser) {
-      return;
-    }
-    
-    const sharedPuck = sharedPuckRef.current;
-    
-    // Solo inicializar el puck si no existe y somos el primer (o único) usuario conectado
-    // Se podría refinar la lógica para decidir quién inicializa el puck si hay varios usuarios.
-    if (sharedPuck.size === 0 && users.size <= 1) {
-      // Lógica para inicializar puck
-      const posMap = new Y.Map();
-      posMap.set('x', 0);
-      posMap.set('y', PUCK_HEIGHT);
-      posMap.set('z', 0);
-      const velMap = new Y.Map();
-      velMap.set('x', 0);
-      velMap.set('z', 0);
-      ydocRef.current.transact(() => {
-        sharedPuck.set('position', posMap);
-        sharedPuck.set('velocity', velMap);
-      });
-    }
-  }, [currentUser, users.size, providerRef.current?.wsconnected]);
-
-  // Efecto 4: Bucle de física para colisiones y aplicar impulsos.
-  useEffect(() => {
-    if (physicsIntervalRef.current) {
-      clearInterval(physicsIntervalRef.current);
+      ydocRef.current = undefined;
+      providerRef.current = undefined;
+      usersMapRef.current = undefined;
+      puckMapRef.current = undefined;
       physicsIntervalRef.current = null;
+      hasLoggedErrorRef.current = false;
+    };
+  }, [roomName, serverUrl, userId]);
+
+  // Suscripciones al estado
+  const users = useYMapValuesAsArray<UserData>(usersMapRef.current);
+  const puck = useYMapEntry<PuckState>(puckMapRef.current, 'state');
+
+  // Efecto para el bucle de física (60Hz)
+  useEffect(() => {
+    if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+
+    // Solo un cliente (o el "host" designado) debería ejecutar la física principal.
+    // Para simplificar, aquí cualquier cliente puede intentar calcular si el puck existe.
+    // Se necesita una estrategia de "autoridad" para evitar conflictos en una app real.
+    // Por ejemplo, el cliente con el `userId` alfabéticamente menor podría ser el host.
+    // O, si solo hay un usuario, ese usuario corre la física.
+    // O el servidor es la autoridad (requiere más cambios).
+
+    // Estrategia simple: el primer usuario en la lista de users (ordenado por ID) corre la física.
+    // Esto es solo un ejemplo, puede no ser robusto.
+    let amIHost = false;
+    if (users.length > 0) {
+        const sortedUsers = [...users].sort((a, b) => a.id.localeCompare(b.id));
+        if (sortedUsers[0].id === userId) {
+            amIHost = true;
+        }
+    }
+    // Si solo estoy yo, soy el host para la física del puck.
+    if (users.length === 1 && users[0].id === userId) {
+        amIHost = true;
     }
 
-    physicsIntervalRef.current = setInterval(() => {
-      if (puck && users.size > 0 && providerRef.current?.wsconnected) {
-        // Llamar a la función interna que ahora tiene acceso a applyImpulseToPuck
-        updatePuckPhysicsInternal();
-      }
-    }, 1000 / 60); // Ejecutar a ~60 FPS
+
+    if (amIHost && puckMapRef.current) { // Solo el "host" calcula
+      physicsIntervalRef.current = window.setInterval(() => {
+        const currentPuckState = puckMapRef.current!.get('state') as PuckState | undefined;
+        const currentUsers = Array.from(usersMapRef.current!.values()); // Usar datos frescos de Yjs users
+
+        if (currentPuckState && currentUsers.length > 0) {
+          const nextPuck = computeNextPuckState(currentPuckState, currentUsers, 1 / 60);
+          puckMapRef.current!.set('state', nextPuck); // Actualiza el estado compartido
+        }
+      }, 1000 / 60);
+    }
 
     return () => {
-      if (physicsIntervalRef.current) {
-        clearInterval(physicsIntervalRef.current);
-        physicsIntervalRef.current = null;
+      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+    };
+  // Dependencias: `users` para re-evaluar quién es el host, `userId` para la comparación.
+  }, [users, userId]);
+
+
+  // Funciones para actualizar el estado desde la UI u otros componentes
+  const updateCurrentUserPosition = useCallback((pos: { x: number; y: number }) => {
+    if (usersMapRef.current && userId) {
+      const currentUserData = usersMapRef.current.get(userId);
+      if (currentUserData) {
+        usersMapRef.current.set(userId, { ...currentUserData, x: pos.x, y: pos.y });
       }
-    };
-  }, [puck, users, providerRef.current?.wsconnected, applyImpulseToPuck]); // Agregado applyImpulseToPuck a las dependencias
-
-  // Función para actualizar la posición del usuario
-  const updateUserPosition = (newPosition: GameObjectPosition) => {
-    if (!currentUser || !providerRef.current?.wsconnected) {
-      return; // Salir si no estamos listos
     }
-    
-    // Restringir movimiento (clamp)
-    const clampedX = Math.max(-TABLE_WIDTH / 2 + PADDLE_RADIUS, Math.min(TABLE_WIDTH / 2 - PADDLE_RADIUS, newPosition.x));
-    const clampedZ = Math.max(-TABLE_DEPTH / 2 + PADDLE_RADIUS, Math.min(TABLE_DEPTH / 2 - PADDLE_RADIUS, newPosition.z));
-    
-    const finalPosition = {
-      x: clampedX,
-      y: currentUser.position.y, // Mantener la altura Y actual del paddle
-      z: clampedZ,
-    };
+  }, [userId]);
 
-    // 1. Actualizar estado local INMEDIATAMENTE para feedback rápido
-    const updatedUser: UserData = {
-      ...currentUser,
-      position: finalPosition,
-    };
-    setCurrentUser(updatedUser);
-
-    // 2. Actualizar Yjs Map (esto notificará a otros y a nuestros propios observers)
-    const sharedUsers = sharedUsersRef.current;
-    const userMap = sharedUsers.get(currentUser.id);
-    
-    if (userMap instanceof Y.Map) {
-      const posMap = userMap.get('position');
-      if (posMap instanceof Y.Map) {
-        // Usar transacción para agrupar potencialmente cambios futuros
-        ydocRef.current.transact(() => {
-          posMap.set('x', finalPosition.x);
-          posMap.set('y', finalPosition.y);
-          posMap.set('z', finalPosition.z);
-        });
-      } else {
-        console.error("[Hook] updateUserPosition - Yjs posMap no encontrado para el usuario.");
-      }
-    } else {
-       console.error("[Hook] updateUserPosition - Yjs userMap no encontrado para el usuario.");
-    }
-  };
-
-  // Función para establecer el nombre del usuario
-  const setUserName = (name: string) => {
-    if (!currentUser || !providerRef.current?.wsconnected) return;
-    
-    // Guardar nombre en localStorage
-    localStorage.setItem('userName', name);
-    
-    // Actualizar estado local
-    const updatedUser = {
-      ...currentUser,
-      name,
-    };
-    setCurrentUser(updatedUser);
-    
-    // Actualizar nombre en el mapa compartido
-    const sharedUsers = sharedUsersRef.current;
-    const userMap = sharedUsers.get(currentUser.id);
-    
-    if (userMap instanceof Y.Map) {
-      userMap.set('name', name);
-    }
-  };
-
-  // Función para reiniciar el puck en el centro
-  const resetPuck = () => {
-    const newPosition = { x: 0, y: PUCK_HEIGHT, z: 0 };
-    const newVelocity = { x: 0, z: 0 }; // Velocidad cero, no hay movimiento automático
-    
-    // Actualizar estado local
-    setPuck({
-      position: newPosition,
-      velocity: newVelocity
-    });
-    
-    // Si hay conexión WebSocket, actualizar también el estado compartido
-    if (providerRef.current?.wsconnected) {
-      const sharedPuck = sharedPuckRef.current;
-      ydocRef.current.transact(() => {
-        const posMap = sharedPuck.get('position');
-        const velMap = sharedPuck.get('velocity');
+  const applyImpulseToPuck = useCallback((impulseVx: number, impulseVy: number) => {
+    if (puckMapRef.current) {
+      const currentPuck = puckMapRef.current.get('state') as PuckState | undefined;
+      if (currentPuck) {
+        // Verificar si el impulso es suficientemente grande
+        const impulseStrength = Math.sqrt(impulseVx * impulseVx + impulseVy * impulseVy);
+        const minStrength = 0.05;
         
-        if (posMap instanceof Y.Map && velMap instanceof Y.Map) {
-          posMap.set('x', newPosition.x);
-          posMap.set('y', newPosition.y);
-          posMap.set('z', newPosition.z);
-          velMap.set('x', newVelocity.x);
-          velMap.set('z', newVelocity.z);
+        // Si el impulso es muy débil, no hacemos nada
+        if (impulseStrength < minStrength) {
+          console.log(`[Impulso] Demasiado débil (${impulseStrength.toFixed(3)}), ignorando`);
+          return;
         }
-      });
+        
+        // Si el impulso es pequeño pero no insignificante, lo aumentamos
+        let finalImpulseVx = impulseVx;
+        let finalImpulseVy = impulseVy;
+        
+        // Para air hockey, asegurar impulsos más potentes
+        if (impulseStrength < 0.3) {
+          const scale = 0.3 / impulseStrength;
+          finalImpulseVx *= scale;
+          finalImpulseVy *= scale; 
+          console.log(`[Impulso] Amplificado de ${impulseStrength.toFixed(3)} a 0.300`);
+        }
+        
+        // Añadir una pequeña variación aleatoria para simular imperfecciones en el golpe
+        const randomVariation = 0.05; // 5% de variación
+        finalImpulseVx += finalImpulseVx * (Math.random() * 2 - 1) * randomVariation;
+        finalImpulseVy += finalImpulseVy * (Math.random() * 2 - 1) * randomVariation;
+        
+        // En air hockey, el impulso a veces reemplaza la velocidad en lugar de sumarse
+        // Esto simula un golpe directo donde la dirección viene determinada por el golpe
+        // en lugar de conservar el momento anterior
+        const currentSpeed = Math.sqrt(currentPuck.vx * currentPuck.vx + currentPuck.vy * currentPuck.vy);
+        const newImpulseSpeed = Math.sqrt(finalImpulseVx * finalImpulseVx + finalImpulseVy * finalImpulseVy);
+        
+        let newVx, newVy;
+        
+        // Si el golpe es significativamente más fuerte que la velocidad actual, reemplazar
+        if (newImpulseSpeed > currentSpeed * 1.5) {
+          newVx = finalImpulseVx;
+          newVy = finalImpulseVy;
+          console.log(`[Impulso] Reemplazando velocidad con golpe fuerte`);
+        } else {
+          // De lo contrario, sumar al movimiento actual (conservar momento)
+          newVx = currentPuck.vx + finalImpulseVx;
+          newVy = currentPuck.vy + finalImpulseVy;
+        }
+        
+        // Limitador de velocidad máxima para air hockey
+        const maxSpeed = 10.0;
+        const resultingSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
+        if (resultingSpeed > maxSpeed) {
+          const reduction = maxSpeed / resultingSpeed;
+          newVx *= reduction;
+          newVy *= reduction;
+          console.log(`[Impulso] Limitando velocidad máxima a ${maxSpeed.toFixed(1)} m/s`);
+        }
+        
+        const newPuckState: PuckState = {
+          ...currentPuck,
+          vx: newVx,
+          vy: newVy,
+        };
+        
+        console.log(`[Impulso] Aplicado: vx=${newVx.toFixed(3)}, vy=${newVy.toFixed(3)}`);
+        puckMapRef.current.set('state', newPuckState);
+      }
     }
-  };
+  }, []);
 
   return {
     users,
-    currentUser,
     puck,
-    updateUserPosition,
-    setUserName,
-    resetPuck,
+    userId,
+    yDoc: ydocRef.current,
+    updateCurrentUserPosition,
     applyImpulseToPuck,
   };
-}; 
+}

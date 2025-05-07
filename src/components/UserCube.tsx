@@ -2,7 +2,7 @@ import { Text, Cylinder } from '@react-three/drei';
 import { useRef, useState, useEffect } from 'react';
 import { ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { Mesh, Vector3, Group, Raycaster, Plane } from 'three';
-import { UserData } from '../hooks/useCollaborativeState';
+import { UserData } from '../components/Scene3D';
 
 interface UserCubeProps {
   userData: UserData;
@@ -11,6 +11,7 @@ interface UserCubeProps {
   tableDepth?: number;
   tableWidth?: number;
   paddleRadius?: number;
+  showHitbox?: boolean;
 }
 
 const UserCube: React.FC<UserCubeProps> = ({
@@ -20,9 +21,11 @@ const UserCube: React.FC<UserCubeProps> = ({
   tableDepth = 6,
   tableWidth = 10,
   paddleRadius = 0.5,
+  showHitbox = true,
 }) => {
   const groupRef = useRef<Group>(null);
   const meshRef = useRef<Mesh>(null);
+  const hitboxRef = useRef<Mesh>(null);
   const [isDragging, setIsDragging] = useState(false);
   const { camera, mouse } = useThree();
   
@@ -138,7 +141,18 @@ const UserCube: React.FC<UserCubeProps> = ({
 
   return (
     <group ref={groupRef} position={[userData.position.x, userData.position.y, userData.position.z]}>
-      {/* Base del paddle */}
+      {/* Hitbox mejorada - Ahora visible para debug */}
+      <Cylinder
+        ref={hitboxRef}
+        position={[0, 0, 0]}
+        args={[paddleRadius * 1.15, paddleRadius * 1.15, paddleRadius * 1.5, 32]}
+        rotation={[Math.PI / 2, 0, 0]}
+        visible={showHitbox}
+      >
+        <meshBasicMaterial color="red" wireframe={true} transparent opacity={0.5} />
+      </Cylinder>
+      
+      {/* Base del paddle visible */}
       <Cylinder
         ref={meshRef}
         position={[0, 0, 0]}
@@ -153,7 +167,7 @@ const UserCube: React.FC<UserCubeProps> = ({
         <meshStandardMaterial 
           color={userData.color} 
           opacity={isCurrentUser ? 1 : 0.7}
-          transparent={!isCurrentUser}
+          transparent={!isCurrentUser || showHitbox}
           roughness={0.3}
           metalness={0.7}
         />

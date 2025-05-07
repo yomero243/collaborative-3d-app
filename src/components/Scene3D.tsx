@@ -3,7 +3,19 @@ import { Environment, ContactShadows } from '@react-three/drei';
 import UserCube from './UserCube';
 import AirHockeyTable from './AirHockeyTable';
 import Puck from './Puck';
-import { UserData, PuckData } from '../hooks/useCollaborativeState';
+
+export interface UserData {
+  id: string;
+  name: string;
+  color: string;
+  position: { x: number; y: number; z: number };
+  score: number;
+}
+
+export interface PuckData {
+  position: { x: number; y: number; z: number };
+  velocity: { x: number; z: number };
+}
 
 interface Scene3DProps {
   users: Map<string, UserData>;
@@ -68,7 +80,7 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
         
         <AirHockeyTable width={TABLE_WIDTH} depth={TABLE_DEPTH} />
         
-        <Puck puckData={puck} radius={0.25} />
+        <Puck puckData={puck} radius={0.25} showHitbox={true} />
 
         {Array.from(users.values()).map((userData) => (
           <UserCube
