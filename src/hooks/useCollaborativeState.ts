@@ -12,8 +12,6 @@ const PADDLE_RADIUS = 0.5; // m - Actualizado para coincidir con la representaci
 const PUCK_FRICTION = 0.995; // Aumentado para simular mejor el deslizamiento sobre aire
 /** Coeficiente de restitución contra las paredes (0-1). */
 const WALL_BOUNCE_FACTOR = 0.85; // Ligeramente aumentado para rebotes más enérgicos
-/** Coeficiente de restitución contra las paletas (0-inf). */
-const PADDLE_BOUNCINESS = 1.3; // Aumentado para que los golpes sean más potentes
 /** Velocidad mínima para considerar el puck detenido (m/s). */
 const MIN_SPEED_THRESHOLD = 0.005; // m/s - Reducido para que el puck no se detenga tan rápido
 
@@ -98,7 +96,7 @@ export interface PuckState {
  * @param {number} dt Delta de tiempo en segundos (ej., 1/60 para 60Hz).
  * @returns {PuckState} El nuevo estado calculado del puck.
  */
-function computeNextPuckState(
+/* function computeNextPuckState(
   currentPuck: PuckState,
   users: UserData[],
   dt: number
@@ -148,7 +146,7 @@ function computeNextPuckState(
     const sumRadii = PUCK_RADIUS + PADDLE_RADIUS;
 
     if (distance < sumRadii) { // Hay colisión
-      console.log(`[Colisión] Paddle-Puck detectada: distancia=${distance.toFixed(2)}, sumRadii=${sumRadii}`);
+      // console.log(`[Colisión] Paddle-Puck detectada: distancia=${distance.toFixed(2)}, sumRadii=${sumRadii}`);
       
       // Calcular normal de colisión (vector unitario desde la paleta al puck)
       const nx = dx / distance;
@@ -187,7 +185,7 @@ function computeNextPuckState(
         // Si la velocidad resultante es muy baja, asegurar un impulso mínimo
         vx = nx * minImpulse * 1.8; // Más fuerte para air hockey
         vy = ny * minImpulse * 1.8;
-        console.log(`[Rebote] Aplicando impulso mínimo: vx=${vx.toFixed(2)}, vy=${vy.toFixed(2)}`);
+        // console.log(`[Rebote] Aplicando impulso mínimo: vx=${vx.toFixed(2)}, vy=${vy.toFixed(2)}`);
       }
       
       // Para air hockey, añadimos un poco de variación a la dirección
@@ -208,7 +206,7 @@ function computeNextPuckState(
   }
 
   return { x, y, vx, vy };
-}
+} */
 
 
 // --- Hooks de Suscripción a Yjs (useSyncExternalStore) ---
@@ -217,7 +215,6 @@ function computeNextPuckState(
  * Hook para suscribirse a un Y.Map y devolver sus valores como un array.
  */
 function useYMapValuesAsArray<T>(yMap: Y.Map<T> | undefined): T[] {
-  // Reintroducimos la caché, pero la lógica de comparación será más robusta
   const lastSnapshotRef = useRef<T[]>([]);
   const lastSnapshotStringRef = useRef<string>("[]"); // Cache para el string JSON
 
@@ -231,8 +228,7 @@ function useYMapValuesAsArray<T>(yMap: Y.Map<T> | undefined): T[] {
     let newSnapshotString;
     try {
       newSnapshotString = JSON.stringify(newSnapshot);
-    } catch (e) {
-      console.error("Error serializing snapshot in useYMapValuesAsArray", e, newSnapshot);
+    } catch { // Variable 'e' no usada, se puede omitir el parámetro
       newSnapshotString = "[]"; // Fallback
     }
 
@@ -335,7 +331,9 @@ export function useCollaborativeState(
   const puckMapRef = useRef<Y.Map<unknown>>(); // Usar unknown en lugar de any
   const physicsIntervalRef = useRef<number | null>(null);
   const hasLoggedErrorRef = useRef(false);
-  const [isInitialUserSet, setIsInitialUserSet] = useState(false); // Nuevo estado
+  const [isInitialUserSet, setIsInitialUserSet] = useState(false);
+  const [amIActuallyHost, setAmIActuallyHost] = useState(false);
+  const wakePhysicsRef = useRef<() => void>(() => {}); // Referencia para despertar física
 
   // Efecto para configurar Yjs, WebsocketProvider, y datos iniciales.
   useEffect(() => {
@@ -348,7 +346,7 @@ export function useCollaborativeState(
         throw new Error(`serverUrl debe ser un string válido, recibido: ${serverUrl}`);
       }
 
-      console.log(`[Yjs] Inicializando con roomName: "${roomName}", serverUrl: "${serverUrl}"`);
+      // console.log(`[Yjs] Inicializando con roomName: "${roomName}", serverUrl: "${serverUrl}"`);
       
       // Crear Y.Doc
       const doc = new Y.Doc();
@@ -372,18 +370,18 @@ export function useCollaborativeState(
         
         providerRef.current = provider;
         
-        provider.on('status', (event: { status: string }) => {
-          console.log(`[Yjs] Provider Status: ${event.status}`);
+        provider.on('status', () => {
+          // console.log(`[Yjs] Provider Status: ${event.status}`);
         });
         
-        provider.on('connection-error', (event: Error) => {
-          console.error('[Yjs] Connection error (provider.on):', event);
+        provider.on('connection-error', () => {
+          // console.error('[Yjs] Connection error (provider.on): ', event);
         });
-      } catch (providerError) {
+      } catch { 
         if (!hasLoggedErrorRef.current) {
-          console.error('[Yjs] Error creando WebsocketProvider:', providerError);
-          console.error(`[Yjs] Comprueba que serverUrl (${serverUrl}) y roomName (${roomName}) sean válidos`);
-          console.error('[Yjs] Nota: Si usas localhost en un entorno seguro (HTTPS), cambia a wss:// o usa una URL segura');
+          // console.error('[Yjs] Error creando WebsocketProvider:', providerError);
+          // console.error(`[Yjs] Comprueba que serverUrl (${serverUrl}) y roomName (${roomName}) sean válidos`);
+          // console.error('[Yjs] Nota: Si usas localhost en un entorno seguro (HTTPS), cambia a wss:// o usa una URL segura');
           hasLoggedErrorRef.current = true;
         }
         // Comentado para evitar colapso y permitir un estado degradado:
@@ -409,9 +407,9 @@ export function useCollaborativeState(
         puckMapRef.current.set('state', { x: 0, y: 0, vx: 0, vy: 0 });
       }
       
-    } catch (err) {
+    } catch { 
       if (!hasLoggedErrorRef.current) {
-        console.error('[Yjs] Error en useEffect de inicialización:', err);
+        // console.error('[Yjs] Error en useEffect de inicialización:', err);
         hasLoggedErrorRef.current = true;
       }
     }
@@ -448,102 +446,203 @@ export function useCollaborativeState(
   const users = useYMapValuesAsArray<UserData>(usersMapRef.current);
   const puck = useYMapEntry<PuckState>(puckMapRef.current, 'state');
 
-  // Efecto para el bucle de física (60Hz)
+  // Efecto para determinar si este cliente es el host
   useEffect(() => {
-    if (!isInitialUserSet) { // Esperar a que el usuario inicial esté configurado
-      console.log('[PhysicsDebug] Esperando a que isInitialUserSet sea true.');
-      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current); // Asegurar limpieza si ya existía
-      physicsIntervalRef.current = null;
+    if (!isInitialUserSet) {
+      setAmIActuallyHost(false);
       return;
     }
 
-    if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
-
-    console.log('[PhysicsDebug] useEffect para bucle de física. userId:', userId);
-    console.log('[PhysicsDebug] users:', users);
-
-    let amIHost = false;
+    // console.log('[PhysicsDebug] Evaluando si soy host. users:', users.length);
+    
+    let newAmIHost = false;
     if (users.length > 0) {
-        const sortedUsers = [...users].sort((a, b) => a.id.localeCompare(b.id));
-        if (sortedUsers[0].id === userId) {
-            amIHost = true;
-        }
-        console.log('[PhysicsDebug] Multi-user host check. Sorted users:', sortedUsers, 'My userId:', userId, 'Is host:', amIHost);
+      const sortedUsers = [...users].sort((a, b) => a.id.localeCompare(b.id));
+      if (sortedUsers[0].id === userId) {
+        newAmIHost = true;
+      }
+      // console.log('[PhysicsDebug] Multi-user host check. Sorted users.length:', sortedUsers.length, 'First ID:', sortedUsers[0]?.id.substring(0,8), 'My userId:', userId.substring(0,8), 'Is host:', newAmIHost);
     }
     if (users.length === 1 && users[0].id === userId) {
-        amIHost = true;
-        console.log('[PhysicsDebug] Single-user host check. Is host:', amIHost);
+      newAmIHost = true;
+      // console.log('[PhysicsDebug] Single-user host check. Is host:', newAmIHost);
     }
 
-    console.log('[PhysicsDebug] Final amIHost:', amIHost);
+    // Mostrar solo este log si hay un cambio en el estado de host
+    setAmIActuallyHost(newAmIHost);
+  }, [users, userId, isInitialUserSet, amIActuallyHost]);
 
-    if (amIHost && puckMapRef.current && usersMapRef.current) { // Solo el "host" calcula
-      console.log('[PhysicsDebug] Soy el HOST. Iniciando setInterval para física.');
-      // Capturar las referencias actuales para usarlas de forma segura en el closure del intervalo
-      const currentPuckMap = puckMapRef.current;
-      const currentUsersMap = usersMapRef.current;
+  // Efecto para el bucle de física 
+  useEffect(() => {
+    // Asegurarse de que no haya intervalos previos activos
+    if (physicsIntervalRef.current) {
+      clearInterval(physicsIntervalRef.current);
+      physicsIntervalRef.current = null;
+    }
+
+    if (!isInitialUserSet || !amIActuallyHost) {
+      return;
+    }
+
+    // Asegurarse de que tenemos todas las referencias necesarias
+    if (!puckMapRef.current || !usersMapRef.current) {
+      return;
+    }
+
+    // Referencias locales
+    const currentPuckMap = puckMapRef.current;
+    
+    // Objeto puck reutilizable para evitar crear nuevos
+    const puckCache = { x: 0, y: 0, vx: 0, vy: 0 };
+    
+    // Sistema de suspensión para minimizar CPU
+    let isSleeping = true;
+    let sleepCheckTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    
+    // Variables para animación
+    let animationFrameId: number | null = null;
+    let lastUpdateTime = 0;
+    const TARGET_FPS = 30;
+    const FRAME_MIN_TIME = (1000/TARGET_FPS);
+    
+    // Wake/sleep control para minimizar CPU
+    function scheduleWakeCheck() {
+      if (sleepCheckTimeoutId) clearTimeout(sleepCheckTimeoutId);
       
-      // Crear un array para reutilizar en el bucle de física
-      // Esto evita crear un nuevo array en cada ciclo del intervalo
-      const usersDataCache: UserData[] = [];
-      
-      // Ref para verificar si el puck está realmente en movimiento
-      const isPuckMovingRef = {current: false};
-
-      physicsIntervalRef.current = window.setInterval(() => {
-        // Usar las referencias capturadas
-        const currentPuckState = currentPuckMap.get('state') as PuckState | undefined;
-        
-        if (!currentPuckState) {
-          // console.log('[PhysicsDebug] Interval: No currentPuckState. Retornando.'); // Puede ser muy ruidoso
-          return;
-        }
-        
-        const puckSpeed = Math.sqrt(currentPuckState.vx * currentPuckState.vx + currentPuckState.vy * currentPuckState.vy);
-        const isMovingNow = puckSpeed > MIN_SPEED_THRESHOLD * 2;
-        
-        // console.log(`[PhysicsDebug] Interval: Puck (vx:${currentPuckState.vx.toFixed(3)}, vy:${currentPuckState.vy.toFixed(3)}), Speed:${puckSpeed.toFixed(3)}, isMovingNow:${isMovingNow}, wasMoving:${isPuckMovingRef.current}`);
-
-        if (!isMovingNow && !isPuckMovingRef.current) {
-          // console.log('[PhysicsDebug] Interval: Puck no se mueve y no se movía. Omitiendo computeNextPuckState.'); // Puede ser ruidoso
-          return;
-        }
-        
-        isPuckMovingRef.current = isMovingNow;
-        
-        // Obtener usuarios actuales más eficientemente
-        // Reutilizamos el array en lugar de crear uno nuevo en cada ciclo
-        usersDataCache.length = 0; // Vaciar el array sin crear uno nuevo
-        currentUsersMap.forEach(userData => {
-          usersDataCache.push(userData);
-        });
-        
-        if (usersDataCache.length > 0) {
-          // console.log('[PhysicsDebug] Interval: Calculando nextPuckState.'); // Puede ser ruidoso
-          const nextPuck = computeNextPuckState(currentPuckState, usersDataCache, 1 / 60);
-          
-          if (nextPuck.x !== currentPuckState.x || 
-              nextPuck.y !== currentPuckState.y || 
-              nextPuck.vx !== currentPuckState.vx || 
-              nextPuck.vy !== currentPuckState.vy) {
-            // console.log('[PhysicsDebug] Interval: Puck state cambió. Actualizando Y.Map.'); // Puede ser ruidoso
-            currentPuckMap.set('state', nextPuck); // Actualiza el estado compartido
+      sleepCheckTimeoutId = setTimeout(() => {
+        // Verificar si el puck está en movimiento
+        const currentPuck = currentPuckMap.get('state') as PuckState | undefined;
+        if (currentPuck) {
+          const sqSpeed = currentPuck.vx * currentPuck.vx + currentPuck.vy * currentPuck.vy;
+          if (sqSpeed < MIN_SPEED_THRESHOLD * MIN_SPEED_THRESHOLD * 0.25) { // Umbral más sensible para dormir
+            // Dormir: cancelar animación
+            if (animationFrameId !== null) {
+              cancelAnimationFrame(animationFrameId);
+              animationFrameId = null;
+              isSleeping = true;
+            }
           }
         }
-      }, 1000 / 60);
-    } else {
-      console.log('[PhysicsDebug] NO soy el HOST o faltan refs. No se inicia setInterval para física.');
+      }, 500); 
     }
+    
+    // Wake up: usado cuando se aplican impulsos
+    function wakePhysics() {
+      if (isSleeping) {
+        isSleeping = false;
+        if (animationFrameId === null) {
+          lastUpdateTime = performance.now();
+          animationFrameId = requestAnimationFrame(updatePhysics);
+        }
+      }
+      
+      // Programar verificación futura para dormir
+      scheduleWakeCheck();
+    }
+    
+    // Actualizar la referencia para que applyImpulseToPuck pueda despertarla
+    wakePhysicsRef.current = wakePhysics;
+    
+    // Función simplificada y ultra-optimizada para física
+    function updatePhysics(currentTime: number) {
+      // Limitación de FPS
+      const timeSinceLastUpdate = currentTime - lastUpdateTime;
+      
+      if (timeSinceLastUpdate >= FRAME_MIN_TIME) {
+        lastUpdateTime = currentTime - (timeSinceLastUpdate % FRAME_MIN_TIME);
+        
+        // Obtener estado del puck de forma segura
+        const currentPuckState = currentPuckMap.get('state') as PuckState | undefined;
+        if (!currentPuckState) {
+          animationFrameId = requestAnimationFrame(updatePhysics);
+          return;
+        }
+        
+        // Copiar valores para evitar modificar el original
+        let { x, y, vx, vy } = currentPuckState;
+        
+        // Verificar si hay movimiento significativo
+        const sqSpeed = vx * vx + vy * vy;
+        const minSpeedSq = MIN_SPEED_THRESHOLD * MIN_SPEED_THRESHOLD;
 
+        if (sqSpeed > minSpeedSq * 0.25) { // Procesar solo si hay movimiento o potencial de movimiento
+          const dt = FRAME_MIN_TIME / 1000; // Usar FRAME_MIN_TIME para dt
+          x += vx * dt;
+          y += vy * dt;
+          
+          vx *= PUCK_FRICTION;
+          vy *= PUCK_FRICTION;
+          
+          if (vx * vx + vy * vy < minSpeedSq) { 
+            vx = 0;
+            vy = 0;
+          }
+          
+          const puckRadius = PUCK_RADIUS;
+          if (x - puckRadius < TABLE_MIN_X) {
+            x = TABLE_MIN_X + puckRadius;
+            vx = -vx * WALL_BOUNCE_FACTOR;
+          } else if (x + puckRadius > TABLE_MAX_X) {
+            x = TABLE_MAX_X - puckRadius;
+            vx = -vx * WALL_BOUNCE_FACTOR;
+          }
+          
+          if (y - puckRadius < TABLE_MIN_Y) {
+            y = TABLE_MIN_Y + puckRadius;
+            vy = -vy * WALL_BOUNCE_FACTOR;
+          } else if (y + puckRadius > TABLE_MAX_Y) {
+            y = TABLE_MAX_Y - puckRadius;
+            vy = -vy * WALL_BOUNCE_FACTOR;
+          }
+          
+          const hasSignificantChanges = 
+            Math.abs(x - currentPuckState.x) > 0.001 || // Umbral de cambio más pequeño
+            Math.abs(y - currentPuckState.y) > 0.001 || 
+            Math.abs(vx - currentPuckState.vx) > 0.001 || 
+            Math.abs(vy - currentPuckState.vy) > 0.001;
+          
+          if (hasSignificantChanges) {
+            puckCache.x = x;
+            puckCache.y = y;
+            puckCache.vx = vx;
+            puckCache.vy = vy;
+            currentPuckMap.set('state', puckCache);
+          }
+        } else if (vx !== 0 || vy !== 0) {
+          // Si velocidad es casi cero pero no exactamente, hacerla cero
+          puckCache.x = x;
+          puckCache.y = y;
+          puckCache.vx = 0;
+          puckCache.vy = 0;
+          currentPuckMap.set('state', puckCache);
+        } else {
+          // No hay movimiento y las velocidades ya son cero
+          if (!isSleeping) {
+            scheduleWakeCheck();
+          }
+        }
+      }
+      
+      // Continuar bucle solo si no estamos durmiendo
+      if (!isSleeping) {
+        animationFrameId = requestAnimationFrame(updatePhysics);
+      }
+    }
+    
+    // Despertarse inicialmente para manejar cualquier movimiento actual
+    wakePhysics();
+    
+    // Limpieza
     return () => {
-      if (physicsIntervalRef.current) {
-        clearInterval(physicsIntervalRef.current);
-        physicsIntervalRef.current = null; // Importante para la re-ejecución del efecto
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      
+      if (sleepCheckTimeoutId) {
+        clearTimeout(sleepCheckTimeoutId);
       }
     };
-  // Dependencias: `users` para re-evaluar quién es el host, `userId` para la comparación.
-  }, [users, userId, isInitialUserSet]); // Añadir isInitialUserSet como dependencia
-
+  }, [amIActuallyHost, isInitialUserSet]);
 
   // Funciones para actualizar el estado desde la UI u otros componentes
   const updateCurrentUserPosition = useCallback((pos: { x: number; y: number }) => {
@@ -568,64 +667,49 @@ export function useCollaborativeState(
     }
   }, [userId]);
 
-  const applyImpulseToPuck = useCallback((impulseVx: number, impulseVy: number) => {
+  const applyImpulseToPuckOriginal = useCallback((impulseVx: number, impulseVy: number) => {
     if (puckMapRef.current) {
       const currentPuck = puckMapRef.current.get('state') as PuckState | undefined;
       if (currentPuck) {
-        // Verificar si el impulso es suficientemente grande
         const impulseStrength = Math.sqrt(impulseVx * impulseVx + impulseVy * impulseVy);
         const minStrength = 0.05;
         
-        // Si el impulso es muy débil, no hacemos nada
         if (impulseStrength < minStrength) {
-          console.log(`[Impulso] Demasiado débil (${impulseStrength.toFixed(3)}), ignorando`);
           return;
         }
         
-        // Si el impulso es pequeño pero no insignificante, lo aumentamos
         let finalImpulseVx = impulseVx;
         let finalImpulseVy = impulseVy;
         
-        // Para air hockey, asegurar impulsos más potentes
         if (impulseStrength < 0.3) {
           const scale = 0.3 / impulseStrength;
           finalImpulseVx *= scale;
           finalImpulseVy *= scale; 
-          console.log(`[Impulso] Amplificado de ${impulseStrength.toFixed(3)} a 0.300`);
         }
         
-        // Añadir una pequeña variación aleatoria para simular imperfecciones en el golpe
-        const randomVariation = 0.05; // 5% de variación
+        const randomVariation = 0.05; 
         finalImpulseVx += finalImpulseVx * (Math.random() * 2 - 1) * randomVariation;
         finalImpulseVy += finalImpulseVy * (Math.random() * 2 - 1) * randomVariation;
         
-        // En air hockey, el impulso a veces reemplaza la velocidad en lugar de sumarse
-        // Esto simula un golpe directo donde la dirección viene determinada por el golpe
-        // en lugar de conservar el momento anterior
         const currentSpeed = Math.sqrt(currentPuck.vx * currentPuck.vx + currentPuck.vy * currentPuck.vy);
         const newImpulseSpeed = Math.sqrt(finalImpulseVx * finalImpulseVx + finalImpulseVy * finalImpulseVy);
         
         let newVx, newVy;
         
-        // Si el golpe es significativamente más fuerte que la velocidad actual, reemplazar
         if (newImpulseSpeed > currentSpeed * 1.5) {
           newVx = finalImpulseVx;
           newVy = finalImpulseVy;
-          console.log(`[Impulso] Reemplazando velocidad con golpe fuerte`);
         } else {
-          // De lo contrario, sumar al movimiento actual (conservar momento)
           newVx = currentPuck.vx + finalImpulseVx;
           newVy = currentPuck.vy + finalImpulseVy;
         }
         
-        // Limitador de velocidad máxima para air hockey
         const maxSpeed = 10.0;
         const resultingSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
         if (resultingSpeed > maxSpeed) {
           const reduction = maxSpeed / resultingSpeed;
           newVx *= reduction;
           newVy *= reduction;
-          console.log(`[Impulso] Limitando velocidad máxima a ${maxSpeed.toFixed(1)} m/s`);
         }
         
         const newPuckState: PuckState = {
@@ -634,8 +718,10 @@ export function useCollaborativeState(
           vy: newVy,
         };
         
-        console.log(`[Impulso] Aplicado: vx=${newVx.toFixed(3)}, vy=${newVy.toFixed(3)}`);
         puckMapRef.current.set('state', newPuckState);
+        
+        // Despertar la física después de aplicar un impulso
+        wakePhysicsRef.current();
       }
     }
   }, []);
@@ -646,6 +732,6 @@ export function useCollaborativeState(
     userId,
     yDoc: ydocRef.current,
     updateCurrentUserPosition,
-    applyImpulseToPuck,
+    applyImpulseToPuck: applyImpulseToPuckOriginal,
   };
 }

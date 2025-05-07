@@ -52,6 +52,10 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
   lastHitTimeRef,
   HIT_COOLDOWN,
 }) => {
+  const paddlePos = useRef(new Vector3());
+  const puckPos = useRef(new Vector3());
+  const impulseDirection = useRef(new Vector3());
+
   useFrame(() => {
     if (!currentUser || !puck || !puck.position) {
       return;
@@ -64,18 +68,25 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
       return;
     }
 
-    const paddlePos = new Vector3(paddleUserData.position.x, PADDLE_Y_CENTER, paddleUserData.position.z);
-    const puckPos = new Vector3(puck.position.x, PUCK_Y_CENTER, puck.position.z);
-    const distanceSq = (paddlePos.x - puckPos.x) ** 2 + (paddlePos.z - puckPos.z) ** 2;
+    paddlePos.current.set(paddleUserData.position.x, PADDLE_Y_CENTER, paddleUserData.position.z);
+    puckPos.current.set(puck.position.x, PUCK_Y_CENTER, puck.position.z);
+    
+    const distanceSq = (paddlePos.current.x - puckPos.current.x) ** 2 + 
+                       (paddlePos.current.z - puckPos.current.z) ** 2;
     const collisionThresholdSq = (PADDLE_RADIUS + PUCK_RADIUS) ** 2;
 
     if (distanceSq < collisionThresholdSq) {
-      console.log("¡Colisión detectada! Paddle:", paddlePos, "Puck:", puckPos);
       lastHitTimeRef.current = currentTime;
-      const impulseDirection = new Vector3().subVectors(puckPos, paddlePos).normalize();
+      
+      impulseDirection.current
+        .subVectors(puckPos.current, paddlePos.current)
+        .normalize();
+      
       const impulseStrength = 5;
-      applyImpulseToPuck(impulseDirection.x * impulseStrength, impulseDirection.z * impulseStrength);
-      console.log(`Aplicando impulso: dx=${impulseDirection.x * impulseStrength}, dz=${impulseDirection.z * impulseStrength}`);
+      applyImpulseToPuck(
+        impulseDirection.current.x * impulseStrength, 
+        impulseDirection.current.z * impulseStrength
+      );
     }
   });
   return null;
@@ -95,13 +106,18 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
   const [optimisticUserPosition, setOptimisticUserPosition] = useState<{ x: number; y: number; z: number } | null>(null);
 
   useEffect(() => {
-    if (currentUser?.position &&
-        (!optimisticUserPosition ||
-         (Math.abs(currentUser.position.x - optimisticUserPosition.x) > 0.1 ||
-          Math.abs(currentUser.position.z - optimisticUserPosition.z) > 0.1))) {
-      setOptimisticUserPosition(currentUser.position);
+    if (!currentUser?.position || !currentUser.id) return;
+    
+    if (!optimisticUserPosition || 
+        Math.abs(currentUser.position.x - optimisticUserPosition.x) > 0.1 ||
+        Math.abs(currentUser.position.z - optimisticUserPosition.z) > 0.1) {
+      setOptimisticUserPosition({
+        x: currentUser.position.x,
+        y: currentUser.position.y,
+        z: currentUser.position.z
+      });
     }
-  }, [currentUser?.position, optimisticUserPosition]);
+  }, [currentUser?.position, currentUser?.id]);
 
   const raycasterRef = useRef(new Raycaster());
   const PADDLE_MOUSE_PLANE_Y = 0.0;
@@ -135,20 +151,23 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
     if (!currentUser || !optimisticUserPosition) {
       return users;
     }
-    if (users.has(currentUser.id)) {
-      const currentUserData = users.get(currentUser.id)!;
-      if (Math.abs(currentUserData.position.x - optimisticUserPosition.x) < 0.001 &&
-          Math.abs(currentUserData.position.z - optimisticUserPosition.z) < 0.001) {
-        return users;
-      }
-      const newOptimisticUsers = new Map(users);
-      newOptimisticUsers.set(currentUser.id, {
-        ...currentUserData,
-        position: optimisticUserPosition
-      });
-      return newOptimisticUsers;
+    
+    const currentUserData = users.get(currentUser.id);
+    if (!currentUserData) {
+      return users;
     }
-    return users;
+    
+    if (Math.abs(currentUserData.position.x - optimisticUserPosition.x) < 0.001 &&
+        Math.abs(currentUserData.position.z - optimisticUserPosition.z) < 0.001) {
+      return users;
+    }
+    
+    const newOptimisticUsers = new Map(users);
+    newOptimisticUsers.set(currentUser.id, {
+      ...currentUserData,
+      position: optimisticUserPosition
+    });
+    return newOptimisticUsers;
   };
 
   const optimisticUsers = getOptimisticUsersData();
