@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
+import { useSyncExternalStore, useEffect, useRef, useCallback, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 
@@ -217,24 +217,39 @@ function computeNextPuckState(
  * Hook para suscribirse a un Y.Map y devolver sus valores como un array.
  */
 function useYMapValuesAsArray<T>(yMap: Y.Map<T> | undefined): T[] {
-  // Usamos un ref para mantener el último snapshot y prevenir el warning
-  // de "The result of getSnapshot should be cached"
+  // Reintroducimos la caché, pero la lógica de comparación será más robusta
   const lastSnapshotRef = useRef<T[]>([]);
+  const lastSnapshotStringRef = useRef<string>("[]"); // Cache para el string JSON
 
   const getSnapshot = useCallback(() => {
-    if (!yMap) return lastSnapshotRef.current;
+    if (!yMap) return lastSnapshotRef.current; // Devolver la última caché si no hay mapa
     
-    // Crear una copia del array de valores
+    // 1. Obtener los valores actuales
     const newSnapshot = Array.from(yMap.values()) as T[];
     
-    // Solo actualizar la referencia si el contenido ha cambiado
-    // Esto es una comparación simplificada, podría necesitar una comparación más profunda
-    // dependiendo de la complejidad de T
-    if (newSnapshot.length !== lastSnapshotRef.current.length) {
+    // 2. Serializar el nuevo snapshot a JSON
+    let newSnapshotString;
+    try {
+      newSnapshotString = JSON.stringify(newSnapshot);
+    } catch (e) {
+      console.error("Error serializing snapshot in useYMapValuesAsArray", e, newSnapshot);
+      newSnapshotString = "[]"; // Fallback
+    }
+
+    // 3. Comparar el string JSON actual con el cacheado
+    if (newSnapshotString !== lastSnapshotStringRef.current) {
+      // Si son diferentes, el contenido ha cambiado.
+      // Actualizar ambas cachés (el array y su string)
       lastSnapshotRef.current = newSnapshot;
+      lastSnapshotStringRef.current = newSnapshotString;
+      // console.log("[useYMapValuesAsArray] Snapshot changed"); // Log opcional para debug
     }
     
+    // 4. Devolver SIEMPRE la referencia del array cacheado.
+    // React detectará el cambio solo cuando actualizamos lastSnapshotRef.current
+    // porque la próxima vez que llame a getSnapshot, obtendrá una referencia diferente.
     return lastSnapshotRef.current;
+
   }, [yMap]);
   
   const subscribe = useCallback((onStoreChange: () => void) => {
@@ -260,7 +275,9 @@ function useYMapEntry<T>(yMap: Y.Map<unknown> | undefined, entryKey: string): T 
     const newValue = (yMap.get(entryKey) as T) || null;
     
     // Solo actualizar la referencia si el valor ha cambiado
-    // Esta comparación puede no ser suficiente para objetos complejos
+    // ESTA COMPARACIÓN SIGUE SIENDO SUPERFICIAL. Podría necesitar mejora si T es un objeto complejo
+    // y solo sus propiedades internas cambian sin que cambie la referencia del objeto en el Y.Map.
+    // Sin embargo, para el puck (que se reemplaza entero con .set), debería funcionar.
     if (newValue !== lastValueRef.current) {
       lastValueRef.current = newValue;
     }
@@ -318,6 +335,7 @@ export function useCollaborativeState(
   const puckMapRef = useRef<Y.Map<unknown>>(); // Usar unknown en lugar de any
   const physicsIntervalRef = useRef<number | null>(null);
   const hasLoggedErrorRef = useRef(false);
+  const [isInitialUserSet, setIsInitialUserSet] = useState(false); // Nuevo estado
 
   // Efecto para configurar Yjs, WebsocketProvider, y datos iniciales.
   useEffect(() => {
@@ -359,7 +377,7 @@ export function useCollaborativeState(
         });
         
         provider.on('connection-error', (event: Error) => {
-          console.error('[Yjs] Connection error:', event);
+          console.error('[Yjs] Connection error (provider.on):', event);
         });
       } catch (providerError) {
         if (!hasLoggedErrorRef.current) {
@@ -368,7 +386,8 @@ export function useCollaborativeState(
           console.error('[Yjs] Nota: Si usas localhost en un entorno seguro (HTTPS), cambia a wss:// o usa una URL segura');
           hasLoggedErrorRef.current = true;
         }
-        throw providerError;
+        // Comentado para evitar colapso y permitir un estado degradado:
+        // throw providerError; 
       }
 
       // Datos iniciales del usuario
@@ -378,10 +397,15 @@ export function useCollaborativeState(
         y: TABLE_MIN_Y + PADDLE_RADIUS + 0.5, // Posición Y cerca del borde inferior con espacio suficiente
         color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}` 
       };
-      usersMapRef.current.set(userId, initialUserData);
+      // Asegurarse de que usersMapRef.current existe antes de usarlo
+      if (usersMapRef.current) {
+        usersMapRef.current.set(userId, initialUserData);
+        setIsInitialUserSet(true); // Señalizar que el usuario inicial está configurado
+      }
       
       // Inicializar puck si no existe
-      if (puckMapRef.current.get('state') === undefined) {
+      // Asegurarse de que puckMapRef.current existe antes de usarlo
+      if (puckMapRef.current && puckMapRef.current.get('state') === undefined) {
         puckMapRef.current.set('state', { x: 0, y: 0, vx: 0, vy: 0 });
       }
       
@@ -394,19 +418,29 @@ export function useCollaborativeState(
   
     // Limpieza al desmontar o cambiar dependencias
     return () => {
-      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+      if (physicsIntervalRef.current) {
+        clearInterval(physicsIntervalRef.current);
+        physicsIntervalRef.current = null;
+      }
       if (providerRef.current) {
         providerRef.current.disconnect();
         providerRef.current.destroy();
+        providerRef.current = undefined;
       }
-      if (ydocRef.current) ydocRef.current.destroy();
+      if (ydocRef.current) {
+        // No es estrictamente necesario limpiar los refs de los mapas aquí,
+        // ya que se invalidarán con ydocRef.current.destroy(),
+        // pero hacerlo explícito no daña.
+        usersMapRef.current = undefined;
+        puckMapRef.current = undefined;
+        
+        ydocRef.current.destroy();
+        ydocRef.current = undefined;
+      }
       
-      ydocRef.current = undefined;
-      providerRef.current = undefined;
-      usersMapRef.current = undefined;
-      puckMapRef.current = undefined;
-      physicsIntervalRef.current = null;
+      // Resetear otros refs para limpieza completa
       hasLoggedErrorRef.current = false;
+      setIsInitialUserSet(false); // Restablecer en la limpieza
     };
   }, [roomName, serverUrl, userId]);
 
@@ -416,56 +450,121 @@ export function useCollaborativeState(
 
   // Efecto para el bucle de física (60Hz)
   useEffect(() => {
+    if (!isInitialUserSet) { // Esperar a que el usuario inicial esté configurado
+      console.log('[PhysicsDebug] Esperando a que isInitialUserSet sea true.');
+      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current); // Asegurar limpieza si ya existía
+      physicsIntervalRef.current = null;
+      return;
+    }
+
     if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
 
-    // Solo un cliente (o el "host" designado) debería ejecutar la física principal.
-    // Para simplificar, aquí cualquier cliente puede intentar calcular si el puck existe.
-    // Se necesita una estrategia de "autoridad" para evitar conflictos en una app real.
-    // Por ejemplo, el cliente con el `userId` alfabéticamente menor podría ser el host.
-    // O, si solo hay un usuario, ese usuario corre la física.
-    // O el servidor es la autoridad (requiere más cambios).
+    console.log('[PhysicsDebug] useEffect para bucle de física. userId:', userId);
+    console.log('[PhysicsDebug] users:', users);
 
-    // Estrategia simple: el primer usuario en la lista de users (ordenado por ID) corre la física.
-    // Esto es solo un ejemplo, puede no ser robusto.
     let amIHost = false;
     if (users.length > 0) {
         const sortedUsers = [...users].sort((a, b) => a.id.localeCompare(b.id));
         if (sortedUsers[0].id === userId) {
             amIHost = true;
         }
+        console.log('[PhysicsDebug] Multi-user host check. Sorted users:', sortedUsers, 'My userId:', userId, 'Is host:', amIHost);
     }
-    // Si solo estoy yo, soy el host para la física del puck.
     if (users.length === 1 && users[0].id === userId) {
         amIHost = true;
+        console.log('[PhysicsDebug] Single-user host check. Is host:', amIHost);
     }
 
+    console.log('[PhysicsDebug] Final amIHost:', amIHost);
 
-    if (amIHost && puckMapRef.current) { // Solo el "host" calcula
+    if (amIHost && puckMapRef.current && usersMapRef.current) { // Solo el "host" calcula
+      console.log('[PhysicsDebug] Soy el HOST. Iniciando setInterval para física.');
+      // Capturar las referencias actuales para usarlas de forma segura en el closure del intervalo
+      const currentPuckMap = puckMapRef.current;
+      const currentUsersMap = usersMapRef.current;
+      
+      // Crear un array para reutilizar en el bucle de física
+      // Esto evita crear un nuevo array en cada ciclo del intervalo
+      const usersDataCache: UserData[] = [];
+      
+      // Ref para verificar si el puck está realmente en movimiento
+      const isPuckMovingRef = {current: false};
+
       physicsIntervalRef.current = window.setInterval(() => {
-        const currentPuckState = puckMapRef.current!.get('state') as PuckState | undefined;
-        const currentUsers = Array.from(usersMapRef.current!.values()); // Usar datos frescos de Yjs users
+        // Usar las referencias capturadas
+        const currentPuckState = currentPuckMap.get('state') as PuckState | undefined;
+        
+        if (!currentPuckState) {
+          // console.log('[PhysicsDebug] Interval: No currentPuckState. Retornando.'); // Puede ser muy ruidoso
+          return;
+        }
+        
+        const puckSpeed = Math.sqrt(currentPuckState.vx * currentPuckState.vx + currentPuckState.vy * currentPuckState.vy);
+        const isMovingNow = puckSpeed > MIN_SPEED_THRESHOLD * 2;
+        
+        // console.log(`[PhysicsDebug] Interval: Puck (vx:${currentPuckState.vx.toFixed(3)}, vy:${currentPuckState.vy.toFixed(3)}), Speed:${puckSpeed.toFixed(3)}, isMovingNow:${isMovingNow}, wasMoving:${isPuckMovingRef.current}`);
 
-        if (currentPuckState && currentUsers.length > 0) {
-          const nextPuck = computeNextPuckState(currentPuckState, currentUsers, 1 / 60);
-          puckMapRef.current!.set('state', nextPuck); // Actualiza el estado compartido
+        if (!isMovingNow && !isPuckMovingRef.current) {
+          // console.log('[PhysicsDebug] Interval: Puck no se mueve y no se movía. Omitiendo computeNextPuckState.'); // Puede ser ruidoso
+          return;
+        }
+        
+        isPuckMovingRef.current = isMovingNow;
+        
+        // Obtener usuarios actuales más eficientemente
+        // Reutilizamos el array en lugar de crear uno nuevo en cada ciclo
+        usersDataCache.length = 0; // Vaciar el array sin crear uno nuevo
+        currentUsersMap.forEach(userData => {
+          usersDataCache.push(userData);
+        });
+        
+        if (usersDataCache.length > 0) {
+          // console.log('[PhysicsDebug] Interval: Calculando nextPuckState.'); // Puede ser ruidoso
+          const nextPuck = computeNextPuckState(currentPuckState, usersDataCache, 1 / 60);
+          
+          if (nextPuck.x !== currentPuckState.x || 
+              nextPuck.y !== currentPuckState.y || 
+              nextPuck.vx !== currentPuckState.vx || 
+              nextPuck.vy !== currentPuckState.vy) {
+            // console.log('[PhysicsDebug] Interval: Puck state cambió. Actualizando Y.Map.'); // Puede ser ruidoso
+            currentPuckMap.set('state', nextPuck); // Actualiza el estado compartido
+          }
         }
       }, 1000 / 60);
+    } else {
+      console.log('[PhysicsDebug] NO soy el HOST o faltan refs. No se inicia setInterval para física.');
     }
 
     return () => {
-      if (physicsIntervalRef.current) clearInterval(physicsIntervalRef.current);
+      if (physicsIntervalRef.current) {
+        clearInterval(physicsIntervalRef.current);
+        physicsIntervalRef.current = null; // Importante para la re-ejecución del efecto
+      }
     };
   // Dependencias: `users` para re-evaluar quién es el host, `userId` para la comparación.
-  }, [users, userId]);
+  }, [users, userId, isInitialUserSet]); // Añadir isInitialUserSet como dependencia
 
 
   // Funciones para actualizar el estado desde la UI u otros componentes
   const updateCurrentUserPosition = useCallback((pos: { x: number; y: number }) => {
+    // Eliminar logs innecesarios para mejorar rendimiento
+    // console.log('[useCollaborativeState] updateCurrentUserPosition called with (x, y=sceneZ):', pos.x.toFixed(2), pos.y.toFixed(2));
+    
     if (usersMapRef.current && userId) {
       const currentUserData = usersMapRef.current.get(userId);
       if (currentUserData) {
-        usersMapRef.current.set(userId, { ...currentUserData, x: pos.x, y: pos.y });
+        // Evitar actualizaciones redundantes que podrían causar re-renderizados innecesarios
+        // Solo actualizar si la posición ha cambiado significativamente
+        if (Math.abs(currentUserData.x - pos.x) > 0.001 || Math.abs(currentUserData.y - pos.y) > 0.001) {
+          const newUserData = { ...currentUserData, x: pos.x, y: pos.y };
+          // console.log('[useCollaborativeState] Setting Y.Map data for user:', userId.substring(0,3));
+          usersMapRef.current.set(userId, newUserData);
+        }
+      } else {
+        // console.warn('[useCollaborativeState] No currentUserData found in Y.Map for ID:', userId);
       }
+    } else {
+      // console.warn('[useCollaborativeState] usersMapRef.current or userId is not available.');
     }
   }, [userId]);
 

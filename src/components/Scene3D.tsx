@@ -1,8 +1,10 @@
-import { Canvas } from '@react-three/fiber';
-import { Environment, ContactShadows } from '@react-three/drei';
+import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
+import { Environment, ContactShadows, OrbitControls, Grid } from '@react-three/drei';
 import UserCube from './UserCube';
 import AirHockeyTable from './AirHockeyTable';
-import Puck from './Puck';
+import PuckComponent from './Puck';
+import { useRef, useState, useEffect } from 'react';
+import { Raycaster, Plane, Vector3 } from 'three';
 
 export interface UserData {
   id: string;
@@ -22,82 +24,220 @@ interface Scene3DProps {
   currentUser: UserData | null;
   puck: PuckData | null;
   onUpdatePosition: (position: { x: number; y: number; z: number }) => void;
+  applyImpulseToPuck: (vx: number, vy: number) => void;
 }
 
-const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePosition }) => {
+interface CollisionDetectorProps {
+  currentUser: UserData | null;
+  puck: PuckData | null;
+  optimisticUsers: Map<string, UserData>;
+  applyImpulseToPuck: (vx: number, vy: number) => void;
+  PADDLE_RADIUS: number;
+  PUCK_RADIUS: number;
+  PADDLE_Y_CENTER: number;
+  PUCK_Y_CENTER: number;
+  lastHitTimeRef: React.MutableRefObject<number>;
+  HIT_COOLDOWN: number;
+}
+
+const CollisionDetector: React.FC<CollisionDetectorProps> = ({
+  currentUser,
+  puck,
+  optimisticUsers,
+  applyImpulseToPuck,
+  PADDLE_RADIUS,
+  PUCK_RADIUS,
+  PADDLE_Y_CENTER,
+  PUCK_Y_CENTER,
+  lastHitTimeRef,
+  HIT_COOLDOWN,
+}) => {
+  useFrame(() => {
+    if (!currentUser || !puck || !puck.position) {
+      return;
+    }
+    const paddleUserData = optimisticUsers.get(currentUser.id);
+    if (!paddleUserData || !paddleUserData.position) return;
+
+    const currentTime = Date.now();
+    if (currentTime - lastHitTimeRef.current < HIT_COOLDOWN) {
+      return;
+    }
+
+    const paddlePos = new Vector3(paddleUserData.position.x, PADDLE_Y_CENTER, paddleUserData.position.z);
+    const puckPos = new Vector3(puck.position.x, PUCK_Y_CENTER, puck.position.z);
+    const distanceSq = (paddlePos.x - puckPos.x) ** 2 + (paddlePos.z - puckPos.z) ** 2;
+    const collisionThresholdSq = (PADDLE_RADIUS + PUCK_RADIUS) ** 2;
+
+    if (distanceSq < collisionThresholdSq) {
+      console.log("¡Colisión detectada! Paddle:", paddlePos, "Puck:", puckPos);
+      lastHitTimeRef.current = currentTime;
+      const impulseDirection = new Vector3().subVectors(puckPos, paddlePos).normalize();
+      const impulseStrength = 5;
+      applyImpulseToPuck(impulseDirection.x * impulseStrength, impulseDirection.z * impulseStrength);
+      console.log(`Aplicando impulso: dx=${impulseDirection.x * impulseStrength}, dz=${impulseDirection.z * impulseStrength}`);
+    }
+  });
+  return null;
+};
+
+const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePosition, applyImpulseToPuck }) => {
   const TABLE_WIDTH = 10;
   const TABLE_DEPTH = 6;
   const PADDLE_RADIUS = 0.5;
+  const PUCK_RADIUS = 0.25;
+  const PADDLE_Y_CENTER = 0.1;
+  const PUCK_Y_CENTER = PUCK_RADIUS;
+
+  const lastHitTimeRef = useRef(0);
+  const HIT_COOLDOWN = 250;
+
+  const [optimisticUserPosition, setOptimisticUserPosition] = useState<{ x: number; y: number; z: number } | null>(null);
+
+  useEffect(() => {
+    if (currentUser?.position &&
+        (!optimisticUserPosition ||
+         (Math.abs(currentUser.position.x - optimisticUserPosition.x) > 0.1 ||
+          Math.abs(currentUser.position.z - optimisticUserPosition.z) > 0.1))) {
+      setOptimisticUserPosition(currentUser.position);
+    }
+  }, [currentUser?.position, optimisticUserPosition]);
+
+  const raycasterRef = useRef(new Raycaster());
+  const PADDLE_MOUSE_PLANE_Y = 0.0;
+  const tableCollisionPlane = useRef(new Plane(new Vector3(0, 1, 0), -PADDLE_MOUSE_PLANE_Y));
+  const intersectionPoint = useRef(new Vector3());
+  const lastMousePosition = useRef<{x: number, z: number} | null>(null);
+
+  const handlePointerMoveOnTable = (event: ThreeEvent<PointerEvent>) => {
+    if (!currentUser) return;
+    raycasterRef.current.ray.copy(event.ray);
+    if (raycasterRef.current.ray.intersectPlane(tableCollisionPlane.current, intersectionPoint.current)) {
+      const halfWidth = TABLE_WIDTH / 2 - PADDLE_RADIUS;
+      const halfDepth = TABLE_DEPTH / 2 - PADDLE_RADIUS;
+      const clampedX = Math.max(-halfWidth, Math.min(halfWidth, intersectionPoint.current.x));
+      const clampedZ = Math.max(-halfDepth, Math.min(halfDepth, intersectionPoint.current.z));
+      if (lastMousePosition.current &&
+          Math.abs(lastMousePosition.current.x - clampedX) < 0.01 &&
+          Math.abs(lastMousePosition.current.z - clampedZ) < 0.01) {
+        return;
+      }
+      lastMousePosition.current = { x: clampedX, z: clampedZ };
+      const newPosition = { x: clampedX, y: PADDLE_Y_CENTER, z: clampedZ };
+      setOptimisticUserPosition(newPosition);
+      onUpdatePosition(newPosition);
+    }
+  };
+
+  const handlePointerLeaveTable = () => { /* Podríamos hacer algo aquí */ };
+
+  const getOptimisticUsersData = () => {
+    if (!currentUser || !optimisticUserPosition) {
+      return users;
+    }
+    if (users.has(currentUser.id)) {
+      const currentUserData = users.get(currentUser.id)!;
+      if (Math.abs(currentUserData.position.x - optimisticUserPosition.x) < 0.001 &&
+          Math.abs(currentUserData.position.z - optimisticUserPosition.z) < 0.001) {
+        return users;
+      }
+      const newOptimisticUsers = new Map(users);
+      newOptimisticUsers.set(currentUser.id, {
+        ...currentUserData,
+        position: optimisticUserPosition
+      });
+      return newOptimisticUsers;
+    }
+    return users;
+  };
+
+  const optimisticUsers = getOptimisticUsersData();
 
   return (
     <div style={{ width: '100%', height: '100vh' }}>
-      <Canvas 
+      <Canvas
         camera={{ position: [0, TABLE_DEPTH * 0.8, TABLE_DEPTH * 1.2], fov: 60 }}
         shadows
       >
-       {/*OrbitControls 
-            enableDamping 
-            dampingFactor={0.1}
-            target={[0, 0, 0]}
-            minDistance={TABLE_DEPTH / 2}
-            maxDistance={TABLE_DEPTH * 2.5}
-            minPolarAngle={Math.PI / 8}
-            maxPolarAngle={Math.PI / 2 - 0.05}
-          />*/}
-        
-       
-          <color attach="background" args={['#111827']} />
-          
-          <ambientLight intensity={0.5} />
-          <directionalLight 
-              position={[TABLE_WIDTH, TABLE_DEPTH * 2, TABLE_DEPTH]} 
-            intensity={1.5} 
-            castShadow 
-            shadow-mapSize-width={2048}
-            shadow-mapSize-height={2048}
-            shadow-camera-far={50}
-            shadow-camera-left={-TABLE_WIDTH * 1.5}
-            shadow-camera-right={TABLE_WIDTH * 1.5}
-            shadow-camera-top={TABLE_DEPTH * 1.5}
-            shadow-camera-bottom={-TABLE_DEPTH * 1.5}
+        <OrbitControls
+          enableDamping
+          dampingFactor={0.1}
+          target={[0, 0, 0]}
+          minDistance={TABLE_DEPTH / 2}
+          maxDistance={TABLE_DEPTH * 2.5}
+          minPolarAngle={Math.PI / 8}
+          maxPolarAngle={Math.PI / 2 - 0.05}
         />
-        <directionalLight position={[-TABLE_WIDTH, 10, -TABLE_DEPTH/2]} intensity={0.5} />
-        
-        {/* Luces de portería */}
+        <color attach="background" args={['#111827']} />
+        <ambientLight intensity={0.5} />
+        <directionalLight
+          position={[TABLE_WIDTH, TABLE_DEPTH * 2, TABLE_DEPTH]}
+          intensity={1.5}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-camera-far={50}
+          shadow-camera-left={-TABLE_WIDTH * 1.5}
+          shadow-camera-right={TABLE_WIDTH * 1.5}
+          shadow-camera-top={TABLE_DEPTH * 1.5}
+          shadow-camera-bottom={-TABLE_DEPTH * 1.5}
+        />
+        <directionalLight position={[-TABLE_WIDTH, 10, -TABLE_DEPTH / 2]} intensity={0.5} />
         <pointLight position={[-TABLE_WIDTH - 0.5, 1, 0]} intensity={2} distance={3} color="red" />
         <pointLight position={[TABLE_WIDTH + 0.5, 1, 0]} intensity={2} distance={3} color="blue" />
-        
         <Environment preset="sunset" />
-        
-        {/* Efecto de sombra suave */}
         <ContactShadows
-          position={[0, -TABLE_DEPTH/2 - 0.01, 0]}
+          position={[0, -TABLE_DEPTH / 2 - 0.01, 0]}
           opacity={0.4}
           scale={20}
           blur={1.5}
           far={4.5}
         />
-        
-        <AirHockeyTable width={TABLE_WIDTH} depth={TABLE_DEPTH} />
-        
-        <Puck puckData={puck} radius={0.25} showHitbox={true} />
-
-        {Array.from(users.values()).map((userData) => (
+        <AirHockeyTable
+          width={TABLE_WIDTH}
+          depth={TABLE_DEPTH}
+          onPointerMove={handlePointerMoveOnTable}
+          onPointerLeave={handlePointerLeaveTable}
+          showGrid={true}
+        />
+        <Grid
+          position={[0, PUCK_Y_CENTER, 0]}
+          args={[TABLE_WIDTH, TABLE_DEPTH]}
+          cellSize={0.5}
+          cellThickness={1}
+          cellColor="#6f6f6f"
+          sectionSize={2}
+          sectionThickness={1.5}
+          sectionColor="#2c82c7"
+          fadeDistance={TABLE_DEPTH * 1.5}
+          fadeStrength={1}
+          infiniteGrid={false}
+        />
+        {puck && puck.position && <PuckComponent puckData={puck} radius={PUCK_RADIUS} showHitbox={true} />}
+        {Array.from(optimisticUsers.values()).map((userDataItem) => (
           <UserCube
-            key={userData.id}
-            userData={userData}
-            isCurrentUser={currentUser?.id === userData.id}
-            onPositionUpdate={
-              currentUser?.id === userData.id ? onUpdatePosition : undefined
-            }
-            tableWidth={TABLE_WIDTH}
-            tableDepth={TABLE_DEPTH}
+            key={userDataItem.id}
+            userData={userDataItem}
+            isCurrentUser={currentUser?.id === userDataItem.id}
             paddleRadius={PADDLE_RADIUS}
           />
         ))}
+
+        <CollisionDetector
+          currentUser={currentUser}
+          puck={puck}
+          optimisticUsers={optimisticUsers}
+          applyImpulseToPuck={applyImpulseToPuck}
+          PADDLE_RADIUS={PADDLE_RADIUS}
+          PUCK_RADIUS={PUCK_RADIUS}
+          PADDLE_Y_CENTER={PADDLE_Y_CENTER}
+          PUCK_Y_CENTER={PUCK_Y_CENTER}
+          lastHitTimeRef={lastHitTimeRef}
+          HIT_COOLDOWN={HIT_COOLDOWN}
+        />
       </Canvas>
     </div>
   );
 };
 
-export default Scene3D; 
+export default Scene3D;
