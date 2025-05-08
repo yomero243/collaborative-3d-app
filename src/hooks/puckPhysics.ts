@@ -140,61 +140,17 @@ export const calculatePuckPhysicsUpdate = (
     const dz = nextPuckPosZ - user.position.z;
     const distance = Math.sqrt(dx * dx + dz * dz);
     
-    const prevDx = currentPuckPosX - user.position.x;
-    const prevDz = currentPuckPosZ - user.position.z;
-    const prevDistance = Math.sqrt(prevDx * prevDx + prevDz * prevDz);
-    
-    const moveX = nextPuckPosX - currentPuckPosX;
-    const moveZ = nextPuckPosZ - currentPuckPosZ;
-    const moveLength = Math.sqrt(moveX * moveX + moveZ * moveZ);
-    
-    let minDistance = Infinity;
-    if (moveLength > 0.001) {
-      const dirX = moveX / moveLength;
-      const dirZ = moveZ / moveLength;
-      const t = dirX * (user.position.x - currentPuckPosX) + dirZ * (user.position.z - currentPuckPosZ);
-      const projX = currentPuckPosX + t * dirX;
-      const projZ = currentPuckPosZ + t * dirZ;
-      if (t >= 0 && t <= moveLength) {
-        const projDx = projX - user.position.x;
-        const projDz = projZ - user.position.z;
-        minDistance = Math.sqrt(projDx * projDx + projDz * projDz);
-      }
-    }
-    
     const paddleHitboxMultiplier = 1.15; 
     // Combined radius ahora es la suma exacta de los radios de los hitboxes visuales
     const combinedRadius = PUCK_RADIUS + (PADDLE_RADIUS * paddleHitboxMultiplier);
     
-    if (distance < combinedRadius || 
-        prevDistance < combinedRadius || 
-        (minDistance < combinedRadius && minDistance !== Infinity)) {
+    // Condición de colisión simplificada
+    if (distance < combinedRadius) {
       paddleCollisionOccurred = true;
       
-      let nx, nz;
-      if (minDistance < combinedRadius && minDistance !== Infinity && distance >= combinedRadius) {
-        const t = (moveX * (user.position.x - currentPuckPosX) + moveZ * (user.position.z - currentPuckPosZ)) / 
-                  (moveX * moveX + moveZ * moveZ);
-        const clampedT = Math.max(0, Math.min(1, t));
-        const closestX = currentPuckPosX + clampedT * moveX;
-        const closestZ = currentPuckPosZ + clampedT * moveZ;
-        nx = closestX - user.position.x;
-        nz = closestZ - user.position.z;
-        const len = Math.sqrt(nx * nx + nz * nz);
-        if (len > 0.001) {
-          nx /= len;
-          nz /= len;
-        } else {
-          nx = Math.random() - 0.5;
-          nz = Math.random() - 0.5;
-          const randomLen = Math.sqrt(nx * nx + nz * nz);
-          nx /= randomLen;
-          nz /= randomLen;
-        }
-      } else {
-        nx = dx / Math.max(distance, 0.001);
-        nz = dz / Math.max(distance, 0.001);
-      }
+      // Cálculo de la normal simplificado y cambiado a const
+      const nx = dx / Math.max(distance, 0.001);
+      const nz = dz / Math.max(distance, 0.001);
       
       const dotProduct = currentPuckVelX * nx + currentPuckVelZ * nz;
       let impulseX = (currentPuckVelX - 2 * dotProduct * nx) * PADDLE_BOUNCINESS;

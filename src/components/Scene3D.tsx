@@ -1,5 +1,5 @@
 import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
-import { Environment, ContactShadows, OrbitControls, Grid } from '@react-three/drei';
+import { Environment, /* ContactShadows, */ OrbitControls, Grid } from '@react-three/drei';
 import UserCube from './UserCube';
 import AirHockeyTable from './AirHockeyTable';
 import PuckComponent from './Puck';
@@ -40,6 +40,11 @@ interface CollisionDetectorProps {
   HIT_COOLDOWN: number;
 }
 
+// Umbral para la fase amplia de detección de colisiones (distancia al cuadrado)
+// Si el puck y la paleta están más lejos que esto (aproximadamente), no se procesa la colisión detallada.
+// (PADDLE_RADIUS + PUCK_RADIUS + buffer)^2 = (0.5 + 0.25 + 1.5)^2 = 2.25^2 = 5.0625
+const BROAD_PHASE_THRESHOLD_SQ = (0.5 + 0.25 + 1.5) ** 2;
+
 const CollisionDetector: React.FC<CollisionDetectorProps> = ({
   currentUser,
   puck,
@@ -63,6 +68,16 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
     const paddleUserData = optimisticUsers.get(currentUser.id);
     if (!paddleUserData || !paddleUserData.position) return;
 
+    // --- Inicio de la Fase Amplia (Broad-phase) ---
+    const dxBroad = paddleUserData.position.x - puck.position.x;
+    const dzBroad = paddleUserData.position.z - puck.position.z;
+    const distanceSqBroad = dxBroad * dxBroad + dzBroad * dzBroad;
+
+    if (distanceSqBroad > BROAD_PHASE_THRESHOLD_SQ) {
+      return; // Puck demasiado lejos, no hay necesidad de comprobar colisión detallada o cooldown
+    }
+    // --- Fin de la Fase Amplia ---
+
     const currentTime = Date.now();
     if (currentTime - lastHitTimeRef.current < HIT_COOLDOWN) {
       return;
@@ -82,7 +97,7 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
         .subVectors(puckPos.current, paddlePos.current)
         .normalize();
       
-      const impulseStrength = 5;
+      const impulseStrength = 1.5;
       applyImpulseToPuck(
         impulseDirection.current.x * impulseStrength, 
         impulseDirection.current.z * impulseStrength
@@ -193,25 +208,18 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
           position={[TABLE_WIDTH, TABLE_DEPTH * 2, TABLE_DEPTH]}
           intensity={1.5}
           castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
           shadow-camera-far={50}
           shadow-camera-left={-TABLE_WIDTH * 1.5}
           shadow-camera-right={TABLE_WIDTH * 1.5}
           shadow-camera-top={TABLE_DEPTH * 1.5}
           shadow-camera-bottom={-TABLE_DEPTH * 1.5}
         />
-        <directionalLight position={[-TABLE_WIDTH, 10, -TABLE_DEPTH / 2]} intensity={0.5} />
-        <pointLight position={[-TABLE_WIDTH - 0.5, 1, 0]} intensity={2} distance={3} color="red" />
-        <pointLight position={[TABLE_WIDTH + 0.5, 1, 0]} intensity={2} distance={3} color="blue" />
+        <directionalLight position={[-TABLE_WIDTH, 10, -TABLE_DEPTH / 2]} intensity={0.25} />
+        <pointLight position={[-TABLE_WIDTH - 0.5, 1, 0]} intensity={1} distance={3} color="red" />
+        <pointLight position={[TABLE_WIDTH + 0.5, 1, 0]} intensity={1} distance={3} color="blue" />
         <Environment preset="sunset" />
-        <ContactShadows
-          position={[0, -TABLE_DEPTH / 2 - 0.01, 0]}
-          opacity={0.4}
-          scale={20}
-          blur={1.5}
-          far={4.5}
-        />
         <AirHockeyTable
           width={TABLE_WIDTH}
           depth={TABLE_DEPTH}

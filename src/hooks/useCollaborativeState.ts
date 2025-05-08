@@ -335,6 +335,11 @@ export function useCollaborativeState(
   const [amIActuallyHost, setAmIActuallyHost] = useState(false);
   const wakePhysicsRef = useRef<() => void>(() => {}); // Referencia para despertar física
 
+  // Refs para throttling de actualización de posición
+  const positionUpdateTimeoutRef = useRef<number | null>(null);
+  const latestPositionToSendRef = useRef<UserData | null>(null);
+  const POSITION_UPDATE_INTERVAL = 50; // ms, para ~20 actualizaciones/segundo
+
   // Efecto para configurar Yjs, WebsocketProvider, y datos iniciales.
   useEffect(() => {
     try {
@@ -502,7 +507,7 @@ export function useCollaborativeState(
     // Variables para animación
     let animationFrameId: number | null = null;
     let lastUpdateTime = 0;
-    const TARGET_FPS = 30;
+    const TARGET_FPS = 60;
     const FRAME_MIN_TIME = (1000/TARGET_FPS);
     
     // Wake/sleep control para minimizar CPU
@@ -523,7 +528,7 @@ export function useCollaborativeState(
             }
           }
         }
-      }, 500); 
+      }, 100); // Reducido de 500ms a 100ms
     }
     
     // Wake up: usado cuando se aplican impulsos
@@ -646,18 +651,24 @@ export function useCollaborativeState(
 
   // Funciones para actualizar el estado desde la UI u otros componentes
   const updateCurrentUserPosition = useCallback((pos: { x: number; y: number }) => {
-    // Eliminar logs innecesarios para mejorar rendimiento
-    // console.log('[useCollaborativeState] updateCurrentUserPosition called with (x, y=sceneZ):', pos.x.toFixed(2), pos.y.toFixed(2));
-    
     if (usersMapRef.current && userId) {
       const currentUserData = usersMapRef.current.get(userId);
       if (currentUserData) {
-        // Evitar actualizaciones redundantes que podrían causar re-renderizados innecesarios
-        // Solo actualizar si la posición ha cambiado significativamente
+        // Solo procesar si la posición ha cambiado significativamente
         if (Math.abs(currentUserData.x - pos.x) > 0.001 || Math.abs(currentUserData.y - pos.y) > 0.001) {
-          const newUserData = { ...currentUserData, x: pos.x, y: pos.y };
-          // console.log('[useCollaborativeState] Setting Y.Map data for user:', userId.substring(0,3));
-          usersMapRef.current.set(userId, newUserData);
+          latestPositionToSendRef.current = { ...currentUserData, x: pos.x, y: pos.y };
+
+          if (positionUpdateTimeoutRef.current) {
+            clearTimeout(positionUpdateTimeoutRef.current);
+          }
+
+          positionUpdateTimeoutRef.current = setTimeout(() => {
+            if (usersMapRef.current && userId && latestPositionToSendRef.current) {
+              usersMapRef.current.set(userId, latestPositionToSendRef.current);
+              // console.log('[Yjs] Throttled user position update sent for', userId.substring(0,3));
+            }
+            positionUpdateTimeoutRef.current = null; // Limpiar ref del timeout una vez ejecutado
+          }, POSITION_UPDATE_INTERVAL);
         }
       } else {
         // console.warn('[useCollaborativeState] No currentUserData found in Y.Map for ID:', userId);
@@ -665,7 +676,7 @@ export function useCollaborativeState(
     } else {
       // console.warn('[useCollaborativeState] usersMapRef.current or userId is not available.');
     }
-  }, [userId]);
+  }, [userId, POSITION_UPDATE_INTERVAL]); // Agregado POSITION_UPDATE_INTERVAL a las dependencias
 
   const applyImpulseToPuckOriginal = useCallback((impulseVx: number, impulseVy: number) => {
     if (puckMapRef.current) {
