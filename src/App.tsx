@@ -1,18 +1,16 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import './App.css'
 import Scene3D, { UserData as SceneUserData, PuckData as ScenePuckData } from './components/Scene3D'
 import UserNameForm from './components/UserNameForm'
+import { ExitButton } from './components/ExitButton'
 import { useCollaborativeState, UserData, PuckState } from './hooks/useCollaborativeState'
 
-function App() {
-  const initialUserName = useMemo(() => localStorage.getItem('userName'), [])
-  const [userName, setUserNameState] = useState<string>(initialUserName || 'Player')
-  const [hasEnteredName, setHasEnteredName] = useState<boolean>(!!initialUserName)
-  
+function GameComponent() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [userScore, setUserScore] = useState<number>(0)
   
-  const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, yDoc } = useCollaborativeState(
+  const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, yDoc, updateUserName } = useCollaborativeState(
     "air-hockey-app",
     "ws://localhost:1234"
   )
@@ -21,11 +19,11 @@ function App() {
 
   const adaptUserToScene = useCallback((user: UserData): SceneUserData => ({
     id: user.id,
-    name: userName,
+    name: user.userName,
     color: user.color,
     position: { x: user.x, y: 0.1, z: user.y },
     score: userScore,
-  }), [userName, userScore])
+  }), [userScore])
 
   const adaptPuckToScene = useCallback((puckState: PuckState | null): ScenePuckData | null => {
     if (!puckState) return null
@@ -39,12 +37,6 @@ function App() {
     updateCurrentUserPosition({ x: position.x, y: position.z })
   }, [updateCurrentUserPosition])
 
-  const handleSetUserName = useCallback((name: string) => {
-    setUserNameState(name)
-    localStorage.setItem('userName', name)
-    setHasEnteredName(true)
-  }, [])
-
   const resetPuck = useCallback(() => {
     if (!yDoc) return
     const puckMap = yDoc.getMap('puck')
@@ -52,17 +44,11 @@ function App() {
   }, [yDoc])
 
   useEffect(() => {
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'userName' && event.newValue) {
-        setUserNameState(event.newValue)
-        setHasEnteredName(true)
-      }
+    const storedName = localStorage.getItem('userName');
+    if (storedName) {
+      updateUserName(storedName);
     }
-    window.addEventListener('storage', handleStorageChange)
-    return () => window.removeEventListener('storage', handleStorageChange)
-  }, [])
-  
-  const showNameForm = !hasEnteredName
+  }, [updateUserName]);
 
   const usersMapForScene = useMemo(() => {
     const map = new Map<string, SceneUserData>()
@@ -84,15 +70,11 @@ function App() {
 
   return (
     <div className="app">
-      {showNameForm && (
-        <UserNameForm 
-          initialName={userName}
-          onSubmit={handleSetUserName} 
-        />
-      )}
-      
       <div className="info-panel">
-        <h1>Air Hockey 3D</h1>
+        <div className="flex justify-between items-center mb-4">
+          <h1>Air Hockey 3D</h1>
+          <ExitButton className="ml-4" />
+        </div>
         {sceneCurrentUser && (
           <>
             <p>Jugador: <span style={{ color: sceneCurrentUser.color }}>{sceneCurrentUser.name}</span></p>
@@ -100,6 +82,18 @@ function App() {
           </>
         )}
         <p>Usuarios conectados: {users.length}</p>
+        
+        <div className="players-list">
+          <h2 className="text-lg font-semibold mb-2">Jugadores:</h2>
+          {users.map(user => (
+            <div key={user.id} className="player-item">
+              <span style={{ color: user.color }}>
+                {user.userName} {user.id === userId ? '(Tú)' : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+
         <p className="instructions">
           Arrastra tu paddle con el mouse para moverlo.
           <br />
@@ -131,5 +125,39 @@ function App() {
     </div>
   )
 }
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<NameEntry />} />
+        <Route path="/game" element={<GamePage />} />
+      </Routes>
+    </Router>
+  )
+}
+
+const NameEntry = () => {
+  const navigate = useNavigate();
+  if (localStorage.getItem('userName')) {
+    return <Navigate to="/game" replace />;
+  }
+  return (
+    <UserNameForm 
+      initialName="" 
+      onSubmit={(name) => {
+        localStorage.setItem('userName', name);
+        navigate('/game');
+      }} 
+    />
+  );
+};
+
+const GamePage = () => {
+  if (!localStorage.getItem('userName')) {
+    return <Navigate to="/" replace />;
+  }
+  return <GameComponent />;
+};
 
 export default App

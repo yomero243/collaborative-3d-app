@@ -40,18 +40,18 @@ body, html {
   position: absolute;
   top: 20px;
   left: 20px;
-  background-color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.7);
   color: white;
-  padding: 15px;
-  border-radius: 5px;
-  max-width: 300px;
+  padding: 20px;
+  border-radius: 10px;
   z-index: 10;
+  min-width: 250px;
 }
 
 .info-panel h1 {
-  margin-top: 0;
-  font-size: 1.5rem;
-  color: #ffcc00;
+  margin: 0;
+  font-size: 24px;
+  font-weight: bold;
 }
 
 .info-panel p {
@@ -126,4 +126,50 @@ body, html {
   .info-panel h1 {
     font-size: 1.2rem;
   }
+}
+
+.flex {
+  display: flex;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.mb-4 {
+  margin-bottom: 1rem;
+}
+
+.ml-4 {
+  margin-left: 1rem;
+}
+
+.players-list {
+  margin: 15px 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.text-lg {
+  font-size: 1.125rem;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.player-item {
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-item span {
+  font-size: 0.95rem;
 }
