@@ -9,6 +9,7 @@ import { useCollaborativeState, UserData, PuckState } from './hooks/useCollabora
 function GameComponent() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [userScore, setUserScore] = useState<number>(0)
+  const [isMouseOverTable, setIsMouseOverTable] = useState(false)
   
   const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, yDoc, updateUserName } = useCollaborativeState(
     "air-hockey-app",
@@ -70,7 +71,7 @@ function GameComponent() {
 
   return (
     <div className="app">
-      <div className="info-panel">
+      <div className={`info-panel ${isMouseOverTable ? 'info-panel-hidden' : ''}`}>
         <div className="flex justify-between items-center mb-4">
           <h1>Air Hockey 3D</h1>
           <ExitButton className="ml-4" />
@@ -121,6 +122,7 @@ function GameComponent() {
         puck={scenePuck}
         onUpdatePosition={handleUpdatePosition}
         applyImpulseToPuck={applyImpulseToPuck}
+        onMouseOverTable={setIsMouseOverTable}
       />
     </div>
   )

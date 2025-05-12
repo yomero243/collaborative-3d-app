@@ -42,6 +42,18 @@ const AirHockeyTable: React.FC<AirHockeyTableProps> = ({
         onPointerMove={onPointerMove} // Pasar la prop
         onPointerLeave={onPointerLeave} // Pasar la prop
       />
+      
+      {/* Plano invisible para mejorar la detección de eventos del mouse */}
+      <mesh 
+        position={[0, 0.1, 0]} 
+        rotation={[-Math.PI / 2, 0, 0]}
+        onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
+      >
+        <planeGeometry args={[width, depth]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+      
       {showGrid && (
         <Grid
           position={[0, 0.15, 0]} // Mantener la rejilla elevada

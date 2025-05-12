@@ -25,6 +25,7 @@ interface Scene3DProps {
   puck: PuckData | null;
   onUpdatePosition: (position: { x: number; y: number; z: number }) => void;
   applyImpulseToPuck: (vx: number, vy: number) => void;
+  onMouseOverTable?: (isOver: boolean) => void;
 }
 
 interface CollisionDetectorProps {
@@ -107,7 +108,14 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
   return null;
 };
 
-const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePosition, applyImpulseToPuck }) => {
+const Scene3D: React.FC<Scene3DProps> = ({ 
+  users, 
+  currentUser, 
+  puck, 
+  onUpdatePosition, 
+  applyImpulseToPuck,
+  onMouseOverTable 
+}) => {
   const TABLE_WIDTH = 10;
   const TABLE_DEPTH = 6;
   const PADDLE_RADIUS = 0.5;
@@ -119,6 +127,13 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
   const HIT_COOLDOWN = 250;
 
   const [optimisticUserPosition, setOptimisticUserPosition] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [isMouseOverTable, setIsMouseOverTable] = useState(false);
+
+  useEffect(() => {
+    if (onMouseOverTable) {
+      onMouseOverTable(isMouseOverTable);
+    }
+  }, [isMouseOverTable, onMouseOverTable]);
 
   useEffect(() => {
     if (!currentUser?.position || !currentUser.id) return;
@@ -142,6 +157,12 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
 
   const handlePointerMoveOnTable = (event: ThreeEvent<PointerEvent>) => {
     if (!currentUser) return;
+    
+    // Actualizar el estado local
+    if (!isMouseOverTable) {
+      setIsMouseOverTable(true);
+    }
+    
     raycasterRef.current.ray.copy(event.ray);
     if (raycasterRef.current.ray.intersectPlane(tableCollisionPlane.current, intersectionPoint.current)) {
       const halfWidth = TABLE_WIDTH / 2 - PADDLE_RADIUS;
@@ -160,7 +181,36 @@ const Scene3D: React.FC<Scene3DProps> = ({ users, currentUser, puck, onUpdatePos
     }
   };
 
-  const handlePointerLeaveTable = () => { /* Podríamos hacer algo aquí */ };
+  const handlePointerLeaveTable = () => { 
+    // Actualizar el estado local
+    setIsMouseOverTable(false);
+  };
+
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      // Verificar si el mouse está fuera del canvas
+      const canvas = document.querySelector('canvas');
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      if (
+        e.clientX < rect.left || 
+        e.clientX > rect.right || 
+        e.clientY < rect.top || 
+        e.clientY > rect.bottom
+      ) {
+        if (isMouseOverTable) {
+          setIsMouseOverTable(false);
+        }
+      }
+    };
+    
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+    };
+  }, [isMouseOverTable]);
 
   const getOptimisticUsersData = () => {
     if (!currentUser || !optimisticUserPosition) {
