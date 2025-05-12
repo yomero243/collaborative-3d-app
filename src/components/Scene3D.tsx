@@ -108,6 +108,12 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
   return null;
 };
 
+// Función para detectar si el dispositivo es móvil
+const isMobileDevice = () => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+    (window.innerWidth <= 768);
+};
+
 const Scene3D: React.FC<Scene3DProps> = ({ 
   users, 
   currentUser, 
@@ -125,6 +131,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
 
   const lastHitTimeRef = useRef(0);
   const HIT_COOLDOWN = 250;
+  const [isMobile, setIsMobile] = useState(isMobileDevice());
 
   const [optimisticUserPosition, setOptimisticUserPosition] = useState<{ x: number; y: number; z: number } | null>(null);
   const [isMouseOverTable, setIsMouseOverTable] = useState(false);
@@ -237,6 +244,17 @@ const Scene3D: React.FC<Scene3DProps> = ({
 
   const optimisticUsers = getOptimisticUsersData();
 
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(isMobileDevice());
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
   return (
     <div style={{ width: '100%', height: '100vh' }}>
       <Canvas
@@ -251,6 +269,9 @@ const Scene3D: React.FC<Scene3DProps> = ({
           maxDistance={TABLE_DEPTH * 2.5}
           minPolarAngle={Math.PI / 8}
           maxPolarAngle={Math.PI / 2 - 0.05}
+          enableZoom={!isMobile}
+          enableRotate={!isMobile}
+          enablePan={!isMobile}
         />
         <color attach="background" args={['#111827']} />
         <ambientLight intensity={0.5} />
