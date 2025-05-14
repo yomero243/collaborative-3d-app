@@ -114,7 +114,7 @@ function useYMapEntry<T>(yMap: Y.Map<unknown> | undefined, entryKey: string): T 
 
 export function useCollaborativeState(
   roomName: string = "default-room",
-  serverUrl: string = "ws://localhost:1234"
+  serverUrl: string = "ws://127.0.0.1:1234"
 ): {
   users: UserData[];
   puck: PuckState | null;

@@ -1,6 +1,11 @@
 import { useGLTF, Grid } from '@react-three/drei';
 import modelUrl from '../assets/Untitled.glb'; // Importar el modelo
 import { ThreeEvent } from '@react-three/fiber'; // Importar ThreeEvent
+import * as THREE from 'three'; // Importar THREE
+import { useState, useEffect } from 'react';
+import textureUrl from '../assets/Material.001_baseColor_1001.png'; // Importar la textura
+import normalMapUrl from '../assets/Material.001_normal_1001.png'; // Importar mapa de normales
+import ormMapUrl from '../assets/Material.001_occlusionRoughnessMetallic_1001.png'; // Importar mapa ORM
 // import * as THREE from 'three'; // Eliminado porque no se usa
 
 interface AirHockeyTableProps {
@@ -26,9 +31,75 @@ const AirHockeyTable: React.FC<AirHockeyTableProps> = ({
 }) => {
   // Cargar el modelo GLB usando la URL importada
   const { scene } = useGLTF(modelUrl);
+  const [model, setModel] = useState<THREE.Group | null>(null);
 
-  // Clonar la escena para poder manipularla (opcional pero buena práctica si se reutiliza)
-  const model = scene.clone();
+  // Cargar las texturas
+  useEffect(() => {
+    const textureLoader = new THREE.TextureLoader();
+    
+    // Cargar texturas asegurando que los parámetros estén correctamente configurados
+    const baseTexture = textureLoader.load(textureUrl);
+    const normalTexture = textureLoader.load(normalMapUrl);
+    const ormTexture = textureLoader.load(ormMapUrl);
+    
+    // Configurar correctamente las texturas
+    [baseTexture, normalTexture, ormTexture].forEach(texture => {
+      texture.flipY = false; // Las texturas GLTF no deben voltear en Y
+      texture.colorSpace = THREE.SRGBColorSpace; // Usar SRGBColorSpace en lugar de encoding
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    });
+    
+    // Clonar la escena
+    const clonedScene = scene.clone();
+    
+    // Aplicar las texturas
+    clonedScene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        // Asegurarnos que la geometría tiene UVs
+        if (child.geometry && !child.geometry.attributes.uv2 && child.geometry.attributes.uv) {
+          child.geometry.setAttribute('uv2', child.geometry.attributes.uv);
+        }
+        
+        if (child.material) {
+          // Procesamos material único o array de materiales
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          
+          materials.forEach(mat => {
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              // Aplicar texturas con configuración correcta
+              mat.map = baseTexture;
+              mat.normalMap = normalTexture;
+              
+              // Configurar el mapa ORM
+              mat.aoMap = ormTexture;
+              mat.roughnessMap = ormTexture;
+              mat.metalnessMap = ormTexture;
+              
+              // Ajustar parámetros para los canales específicos del mapa ORM
+              // Normalmente: R = Oclusión, G = Rugosidad, B = Metalicidad
+              mat.aoMapIntensity = 1.0;
+              mat.roughness = 1.0; 
+              mat.metalness = 1.0;
+              
+              // Ajustar repetición de textura si es necesario
+              // Descomenta y ajusta estos valores si necesitas cambiar la escala de los UVs
+              // baseTexture.repeat.set(2, 2);
+              // normalTexture.repeat.set(2, 2);
+              // ormTexture.repeat.set(2, 2);
+              
+              mat.needsUpdate = true;
+            }
+          });
+        }
+      }
+    });
+    
+    setModel(clonedScene);
+  }, [scene]);
+
+  if (!model) {
+    return null; // O algún componente de carga
+  }
 
   return (
     <group>
