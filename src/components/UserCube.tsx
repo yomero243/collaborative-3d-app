@@ -16,7 +16,7 @@ const UserCube: React.FC<UserCubeProps> = ({
   userData,
   isCurrentUser,
   paddleRadius = 0.5,
-  showHitbox = true,
+  showHitbox = false,
 }) => {
   const groupRef = useRef<Group>(null);
   const hitboxRef = useRef<Mesh>(null);
@@ -117,7 +117,7 @@ const UserCube: React.FC<UserCubeProps> = ({
         rotation={[Math.PI / 2, 0, 0]}
         visible={showHitbox}
       >
-        <meshBasicMaterial color="red" wireframe={true} transparent opacity={0.5} />
+        <meshBasicMaterial color="red" wireframe={false} transparent opacity={0.5} />
       </Cylinder>
       
       {processedPaddleModel && (

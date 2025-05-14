@@ -3,6 +3,7 @@ import { Sphere } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { PuckData } from '../components/Scene3D'; // Importar desde Scene3D
 import * as THREE from 'three';
+import HolographicMaterial from './HolographicMaterial';
 
 interface PuckProps {
   puckData: PuckData | null;
@@ -75,7 +76,7 @@ const Puck: React.FC<PuckProps> = ({
   puckData,
   radius = 0.25,
   color = 'red',
-  showHitbox = true,
+  showHitbox = false,
 }) => {
   const puckRef = useRef<THREE.Mesh>(null);
   const hitboxRef = useRef<THREE.Mesh>(null);
@@ -191,14 +192,14 @@ const Puck: React.FC<PuckProps> = ({
     
     // Efecto de destello en colisiones
     if (Date.now() - lastCollision < 500) {
-      const timeSinceCollision = (Date.now() - lastCollision) / 500; // Normalizado 0-1
-      const collisionFlash = 1 - timeSinceCollision; // Decrece con el tiempo
+      // const timeSinceCollision = (Date.now() - lastCollision) / 500; // Normalizado 0-1
+      // const collisionFlash = 1 - timeSinceCollision; // Decrece con el tiempo
       
-      if (puckRef.current.material instanceof THREE.MeshStandardMaterial) {
-        puckRef.current.material.emissiveIntensity = 0.6 + collisionFlash * collisionIntensity * 3.0;
-      }
+      // if (puckRef.current.material instanceof THREE.MeshStandardMaterial) { 
+      //  puckRef.current.material.emissiveIntensity = 0.6 + collisionFlash * collisionIntensity * 3.0; 
+      // }
     } else if (puckRef.current.material instanceof THREE.MeshStandardMaterial) {
-      puckRef.current.material.emissiveIntensity = 0.6;
+      // puckRef.current.material.emissiveIntensity = 0.6;
     }
   });
 
@@ -220,7 +221,7 @@ const Puck: React.FC<PuckProps> = ({
           args={[radius, 16, 16]}
           visible={true}
         >
-          <meshBasicMaterial color="blue" wireframe={true} transparent opacity={0.5} />
+          <meshBasicMaterial color="blue" wireframe={false} transparent opacity={0.5} />
         </Sphere>
       )}
       
@@ -233,7 +234,7 @@ const Puck: React.FC<PuckProps> = ({
         castShadow
         receiveShadow
       >
-        <meshStandardMaterial 
+        {/* <meshStandardMaterial // <- Comentado
           color={color} 
           emissive={color} 
           emissiveIntensity={0.6}
@@ -241,6 +242,16 @@ const Puck: React.FC<PuckProps> = ({
           metalness={0.7}
           transparent={showHitbox}
           opacity={showHitbox ? 0.8 : 1}
+        /> */}
+        <HolographicMaterial 
+          hologramColor="green"
+          hologramOpacity={showHitbox ? 0.8 : 1.0}
+          enableAdditive={true} // Puedes ajustar estas propiedades según sea necesario
+          fresnelAmount={0.35}
+          fresnelOpacity={0.5}
+          scanlineSize={5.0}
+          signalSpeed={0.3}
+          enableBlinking={true}
         />
       </Sphere>
       
