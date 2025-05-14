@@ -1,8 +1,8 @@
 import { useGLTF, Grid } from '@react-three/drei';
+import { ThreeEvent, useFrame } from '@react-three/fiber'; // Importar ThreeEvent y useFrame
 import modelUrl from '../assets/Untitled.glb'; // Importar el modelo
-import { ThreeEvent } from '@react-three/fiber'; // Importar ThreeEvent
 import * as THREE from 'three'; // Importar THREE
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import textureUrl from '../assets/Material.001_baseColor_1001.png'; // Importar la textura
 import normalMapUrl from '../assets/Material.001_normal_1001.png'; // Importar mapa de normales
 import ormMapUrl from '../assets/Material.001_occlusionRoughnessMetallic_1001.png'; // Importar mapa ORM
@@ -32,6 +32,29 @@ const AirHockeyTable: React.FC<AirHockeyTableProps> = ({
   // Cargar el modelo GLB usando la URL importada
   const { scene } = useGLTF(modelUrl);
   const [model, setModel] = useState<THREE.Group | null>(null);
+  const neonGlowRef = useRef<THREE.Mesh>(null);
+  const neonIntensityRef = useRef(0);
+  const neonColorRef = useRef(new THREE.Color(0x00ffff)); // Color neón cian por defecto
+
+  // Efecto de animación para el brillo neón
+  useFrame(() => {
+    if (neonGlowRef.current) {
+      // Animar la intensidad del brillo neón
+      neonIntensityRef.current = 0.5 + Math.sin(Date.now() * 0.002) * 0.2;
+      
+      // Aplicar la intensidad a la emisión del material
+      const material = neonGlowRef.current.material as THREE.MeshStandardMaterial;
+      material.emissiveIntensity = neonIntensityRef.current;
+      
+      // Cambiar ligeramente el color del neón para un efecto más dinámico
+      neonColorRef.current.setHSL(
+        (Math.sin(Date.now() * 0.001) * 0.1 + 0.5) % 1, // Hue oscila alrededor del cian
+        0.8, // Saturación
+        0.6  // Luminosidad
+      );
+      material.emissive.copy(neonColorRef.current);
+    }
+  });
 
   // Cargar las texturas
   useEffect(() => {
@@ -78,8 +101,8 @@ const AirHockeyTable: React.FC<AirHockeyTableProps> = ({
               // Ajustar parámetros para los canales específicos del mapa ORM
               // Normalmente: R = Oclusión, G = Rugosidad, B = Metalicidad
               mat.aoMapIntensity = 1.0;
-              mat.roughness = 1.0; 
-              mat.metalness = 1.0;
+              mat.roughness = 0.6; // Reducir rugosidad para efecto más brillante
+              mat.metalness = 0.8; // Aumentar metalicidad para efecto más brillante
               
               // Ajustar repetición de textura si es necesario
               // Descomenta y ajusta estos valores si necesitas cambiar la escala de los UVs
@@ -112,6 +135,29 @@ const AirHockeyTable: React.FC<AirHockeyTableProps> = ({
         castShadow
         onPointerMove={onPointerMove} // Pasar la prop
         onPointerLeave={onPointerLeave} // Pasar la prop
+      />
+      
+      {/* Efecto de brillo neón alrededor de la mesa */}
+      <mesh 
+        ref={neonGlowRef}
+        position={[0, -0.95, 0]} 
+        scale={[width * 1.02, 0.05, depth * 1.02]}
+      >
+        <boxGeometry />
+        <meshStandardMaterial
+          color="#111111"
+          emissive={neonColorRef.current}
+          emissiveIntensity={1}
+          toneMapped={false}
+        />
+      </mesh>
+      
+      {/* Luz puntual para aumentar el efecto de brillo */}
+      <pointLight 
+        position={[0, -0.5, 0]} 
+        color={neonColorRef.current} 
+        intensity={2} 
+        distance={10}
       />
       
       {/* Plano invisible para mejorar la detección de eventos del mouse */}

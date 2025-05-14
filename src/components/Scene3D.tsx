@@ -3,6 +3,7 @@ import { Environment, /* ContactShadows, */ OrbitControls, Grid } from '@react-t
 import UserCube from './UserCube';
 import AirHockeyTable from './AirHockeyTable';
 import PuckComponent from './Puck';
+import TileFloor from './TileFloor';
 import { useRef, useState, useEffect } from 'react';
 import { Raycaster, Plane, Vector3 } from 'three';
 
@@ -291,6 +292,15 @@ const Scene3D: React.FC<Scene3DProps> = ({
         <pointLight position={[-TABLE_WIDTH - 0.5, 1, 0]} intensity={1} distance={3} color="red" />
         <pointLight position={[TABLE_WIDTH + 0.5, 1, 0]} intensity={1} distance={3} color="blue" />
         <Environment preset="sunset" />
+        <TileFloor 
+          size={40} 
+          position={[0, -2.2, 0]} 
+          tileSize={2.5} 
+          color1="#1a1a2e" 
+          color2="#303045" 
+          glowColor="#4158D0"
+          glowIntensity={0.3}
+        />
         <AirHockeyTable
           width={TABLE_WIDTH}
           depth={TABLE_DEPTH}
