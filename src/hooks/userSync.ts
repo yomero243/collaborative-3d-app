@@ -1,7 +1,12 @@
 import * as Y from 'yjs';
 import { UserData, GameObjectPosition } from '../types';
 import { generateRandomColor } from '../utils/colors';
-import { TABLE_WIDTH, TABLE_DEPTH, PADDLE_RADIUS, TABLE_HEIGHT } from './puckPhysics'; // Constantes de dimensiones
+import {
+  TABLE_WIDTH,
+  TABLE_DEPTH,
+  PADDLE_RADIUS,
+  TABLE_HEIGHT,
+} from '../utils/physicsConstants'; // Constantes de dimensiones
 
 const USER_ID_KEY = 'collaborativeAppUserId';
 

@@ -6,6 +6,13 @@ import PuckComponent from './Puck';
 import TileFloor from './TileFloor';
 import { useRef, useState, useEffect } from 'react';
 import { Raycaster, Plane, Vector3 } from 'three';
+import {
+  TABLE_WIDTH,
+  TABLE_DEPTH,
+  PADDLE_RADIUS,
+  PUCK_RADIUS,
+  TABLE_HEIGHT,
+} from '../utils/physicsConstants';
 
 export interface UserData {
   id: string;
@@ -123,11 +130,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   applyImpulseToPuck,
   onMouseOverTable 
 }) => {
-  const TABLE_WIDTH = 10;
-  const TABLE_DEPTH = 6;
-  const PADDLE_RADIUS = 0.5;
-  const PUCK_RADIUS = 0.25;
-  const PADDLE_Y_CENTER = 0.1;
+  const PADDLE_Y_CENTER = TABLE_HEIGHT / 2;
   const PUCK_Y_CENTER = PUCK_RADIUS;
 
   const lastHitTimeRef = useRef(0);

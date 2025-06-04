@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { UserData } from './collabTypes';
+import { PADDLE_RADIUS, PUCK_RADIUS } from '../utils/physicsConstants';
 
 const USER_ID_KEY = 'collab3d-userId';
 const JWT_TOKEN_KEY = 'authToken';
@@ -96,7 +97,7 @@ export function useYjsRoom(roomName: string, serverUrl: string): YjsRoom {
       const initialUserData: UserData = {
         id: userId,
         x: (Math.random() - 0.5) * 5,
-        y: -3 + PuckConstants.PADDLE_RADIUS + 0.5,
+        y: -3 + PADDLE_RADIUS + 0.5,
         color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`,
         userName: localStorage.getItem('userName') || 'Player',
         lastUpdate: Date.now()
@@ -150,8 +151,8 @@ export function useYjsRoom(roomName: string, serverUrl: string): YjsRoom {
   };
 }
 
-// Constants used for puck physics setup
+// Constants used for puck physics setup (kept for backward compatibility)
 export const PuckConstants = {
-  PUCK_RADIUS: 0.25,
-  PADDLE_RADIUS: 0.5,
+  PUCK_RADIUS,
+  PADDLE_RADIUS,
 };

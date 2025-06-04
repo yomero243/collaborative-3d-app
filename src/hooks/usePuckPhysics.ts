@@ -2,18 +2,22 @@ import { useCallback, useEffect } from 'react';
 import * as Y from 'yjs';
 import { PuckState } from './collabTypes';
 import { useYMapEntry } from './yMapUtils';
-import { PuckConstants } from './useYjsRoom';
+import {
+  PUCK_RADIUS,
+  PUCK_FRICTION,
+  WALL_BOUNCE_FACTOR,
+  MIN_SPEED_THRESHOLD,
+  PADDLE_BOUNCE_FACTOR,
+  MAX_PUCK_SPEED,
+  MIN_PUCK_SPEED,
+  TABLE_WIDTH,
+  TABLE_DEPTH,
+} from '../utils/physicsConstants';
 
-const PUCK_FRICTION = 0.995;
-const WALL_BOUNCE_FACTOR = 0.85;
-const MIN_SPEED_THRESHOLD = 0.005;
-const PADDLE_BOUNCE_FACTOR = 1.2;
-const MAX_PUCK_SPEED = 15.0;
-const MIN_PUCK_SPEED = 0.1;
-const TABLE_MIN_X = -5;
-const TABLE_MAX_X = 5;
-const TABLE_MIN_Y = -3;
-const TABLE_MAX_Y = 3;
+const TABLE_MIN_X = -TABLE_WIDTH / 2;
+const TABLE_MAX_X = TABLE_WIDTH / 2;
+const TABLE_MIN_Y = -TABLE_DEPTH / 2;
+const TABLE_MAX_Y = TABLE_DEPTH / 2;
 
 export interface PuckPhysics {
   puck: PuckState | null;
@@ -85,19 +89,19 @@ export function usePuckPhysics(puckMap: Y.Map<unknown> | undefined, isHost: bool
       let newX = currentPuck.x + newVx * deltaTime;
       let newY = currentPuck.y + newVy * deltaTime;
 
-      if (newX + PuckConstants.PUCK_RADIUS > TABLE_MAX_X) {
-        newX = TABLE_MAX_X - PuckConstants.PUCK_RADIUS;
+      if (newX + PUCK_RADIUS > TABLE_MAX_X) {
+        newX = TABLE_MAX_X - PUCK_RADIUS;
         newVx = -newVx * WALL_BOUNCE_FACTOR;
-      } else if (newX - PuckConstants.PUCK_RADIUS < TABLE_MIN_X) {
-        newX = TABLE_MIN_X + PuckConstants.PUCK_RADIUS;
+      } else if (newX - PUCK_RADIUS < TABLE_MIN_X) {
+        newX = TABLE_MIN_X + PUCK_RADIUS;
         newVx = -newVx * WALL_BOUNCE_FACTOR;
       }
 
-      if (newY + PuckConstants.PUCK_RADIUS > TABLE_MAX_Y) {
-        newY = TABLE_MAX_Y - PuckConstants.PUCK_RADIUS;
+      if (newY + PUCK_RADIUS > TABLE_MAX_Y) {
+        newY = TABLE_MAX_Y - PUCK_RADIUS;
         newVy = -newVy * WALL_BOUNCE_FACTOR;
-      } else if (newY - PuckConstants.PUCK_RADIUS < TABLE_MIN_Y) {
-        newY = TABLE_MIN_Y + PuckConstants.PUCK_RADIUS;
+      } else if (newY - PUCK_RADIUS < TABLE_MIN_Y) {
+        newY = TABLE_MIN_Y + PUCK_RADIUS;
         newVy = -newVy * WALL_BOUNCE_FACTOR;
       }
 
