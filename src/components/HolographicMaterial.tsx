@@ -173,6 +173,7 @@ const HolographicShaderType = shaderMaterial(
 extend({ HolographicShaderType });
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
       holographicShaderType: ReactThreeFiber.Node<InstanceType<typeof HolographicShaderType> & { time: number }, typeof HolographicShaderType>

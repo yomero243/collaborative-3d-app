@@ -155,7 +155,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
         z: currentUser.position.z
       });
     }
-  }, [currentUser?.position, currentUser?.id]);
+  }, [currentUser?.position, currentUser?.id, optimisticUserPosition]);
 
   const raycasterRef = useRef(new Raycaster());
   const PADDLE_MOUSE_PLANE_Y = 0.0;
