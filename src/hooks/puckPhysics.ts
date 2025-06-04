@@ -1,19 +1,18 @@
 import * as Y from 'yjs';
 import { PuckData, UserData } from '../types';
+import {
+  TABLE_WIDTH,
+  TABLE_HEIGHT,
+  TABLE_DEPTH,
+  PADDLE_RADIUS,
+  PUCK_RADIUS,
+  PUCK_FRICTION,
+  WALL_BOUNCE_FACTOR,
+  MIN_SPEED_THRESHOLD as MINIMUM_PUCK_SPEED,
+  PADDLE_BOUNCE_FACTOR as PADDLE_BOUNCINESS,
+} from '../utils/physicsConstants';
 
-// Constantes para la dimensión de la mesa y objetos
-export const TABLE_WIDTH = 10;
-export const TABLE_HEIGHT = 0.2;
-export const TABLE_DEPTH = 6;
-export const PADDLE_RADIUS = 0.5;
-export const PUCK_RADIUS = 0.25;
 export const PUCK_HEIGHT = TABLE_HEIGHT / 2 + PUCK_RADIUS;
-
-// Constantes de Física - Revertidas al estado anterior (más tipo Air Hockey con impulso)
-export const WALL_BOUNCE_FACTOR = 0.75;
-export const PADDLE_BOUNCINESS = 7.0;
-export const PUCK_FRICTION = 0.995;
-export const MINIMUM_PUCK_SPEED = 0.01;
 
 /**
  * Aplica un impulso al puck, actualizando su posición y velocidad.
