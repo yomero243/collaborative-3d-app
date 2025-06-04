@@ -14,7 +14,7 @@ const server = http.createServer((request, response) => {
 const wss = new WebSocket.Server({ server })
 
 wss.on('connection', (conn, req) => {
-  setupWSConnection(conn, req, { docName: 'collaborative-hockey-app' })
+  setupWSConnection(conn, req)
   console.log('Cliente conectado:', new Date().toLocaleTimeString())
 })
 
