@@ -4,12 +4,25 @@ import { useFrame } from '@react-three/fiber';
 import { PuckData } from '../components/Scene3D'; // Importar desde Scene3D
 import * as THREE from 'three';
 import HolographicMaterial from './HolographicMaterial';
+import {
+  PUCK_VISUAL_LERP_FACTOR,
+  PUCK_SNAP_THRESHOLD_MULTIPLIER,
+  PUCK_ROTATION_SPEED_FACTOR,
+  PUCK_TILT_BASE_FACTOR,
+  PUCK_SPIN_TILT_FACTOR
+} from '../utils/physicsConstants';
 
 interface PuckProps {
   puckData: PuckData | null;
   radius?: number;
   color?: string;
   showHitbox?: boolean;
+  enhancedPhysics?: {
+    angularVelocity?: number;
+    spin?: number;
+    lastCollisionTime?: number;
+    lastCollisionForce?: number;
+  };
 }
 
 // Componente para crear la estela visual del puck
@@ -24,22 +37,22 @@ const PuckTrail: React.FC<{position: THREE.Vector3, color: string, speed: number
   }, []);
   
   useFrame(() => {
-    if (!particles.current) return;
+    if (!particles.current || speed < 0.5) return;
+    
+    const frameStart = performance.now();
+    if (frameStart % 2 !== 0) return; // Skip every other frame
     
     // Actualizar posiciones de partículas
-    // Mover todas las partículas hacia abajo en el array
     for (let i = positions.current.length - 3; i >= 3; i -= 3) {
       positions.current[i] = positions.current[i - 3];
       positions.current[i + 1] = positions.current[i - 2];
       positions.current[i + 2] = positions.current[i - 1];
     }
     
-    // Establecer la primera partícula en la posición actual
     positions.current[0] = position.x;
     positions.current[1] = position.y;
     positions.current[2] = position.z;
     
-    // Actualizar la geometría
     const geometry = particles.current.geometry as THREE.BufferGeometry;
     const positionAttribute = geometry.getAttribute('position');
     const typedArray = positionAttribute.array as Float32Array;
@@ -77,6 +90,7 @@ const Puck: React.FC<PuckProps> = ({
   radius = 0.25,
   color = 'red',
   showHitbox = false,
+  enhancedPhysics,
 }) => {
   const puckRef = useRef<THREE.Mesh>(null);
   const hitboxRef = useRef<THREE.Mesh>(null);
@@ -94,39 +108,22 @@ const Puck: React.FC<PuckProps> = ({
   const isVisualPuckInitialized = useRef(false);
   // Guardar la última posición para detectar cambios bruscos (colisiones)
   const lastPositionRef = useRef(new THREE.Vector3());
-  // Guardar velocidad previa para detectar cambios bruscos
-  const lastVelocityRef = useRef(new THREE.Vector2());
 
-  const SNAP_THRESHOLD = radius * 5; 
-  const LERP_FACTOR = 0.2; 
+  const SNAP_THRESHOLD = radius * PUCK_SNAP_THRESHOLD_MULTIPLIER; 
+  const LERP_FACTOR = PUCK_VISUAL_LERP_FACTOR; 
 
   // Efecto para actualizar targetPosition y manejar la inicialización visual
   useEffect(() => {
     if (puckData && puckData.position) {
       const newPos = new THREE.Vector3(puckData.position.x, puckData.position.y, puckData.position.z);
       
-      // Detectar colisiones basado en cambios bruscos de velocidad
-      if (isVisualPuckInitialized.current && puckRef.current) {
-        const oldVel = lastVelocityRef.current;
-        const newVel = new THREE.Vector2(puckData.velocity.x, puckData.velocity.z);
-        
-        // Verificar si ha habido un cambio brusco en la velocidad (colisión)
-        const velDiff = oldVel.distanceTo(newVel);
-        const newSpeed = newVel.length();
-        const suddenChange = velDiff > 0.3 || newSpeed > 5.0; // Detectar también velocidades altas como colisiones
-        
-        if (suddenChange) {
-          // Calcular intensidad basada en la velocidad y el cambio
-          const intensidad = Math.max(
-            Math.min(1.0, velDiff * 0.5),
-            Math.min(1.0, newSpeed / 10.0)
-          );
+      // Usar datos de colisión del motor de físicas (elimina duplicación)
+      if (isVisualPuckInitialized.current && enhancedPhysics?.lastCollisionTime && enhancedPhysics?.lastCollisionForce) {
+        const timeSinceLastCollision = Date.now() - enhancedPhysics.lastCollisionTime;
+        if (timeSinceLastCollision < 100) {
           setLastCollision(Date.now());
-          setCollisionIntensity(intensidad);
+          setCollisionIntensity(Math.min(1.0, enhancedPhysics.lastCollisionForce / 8.0));
         }
-        
-        // Actualizar velocidad guardada
-        lastVelocityRef.current.set(puckData.velocity.x, puckData.velocity.z);
       }
       
       // Actualizar posición objetivo
@@ -151,18 +148,21 @@ const Puck: React.FC<PuckProps> = ({
         puckRef.current.visible = false;
       }
     }
-  }, [puckData]); // Depender del objeto puckData completo o de sus propiedades relevantes.
+  }, [puckData, enhancedPhysics?.lastCollisionTime, enhancedPhysics?.lastCollisionForce]);
 
   useFrame((state, delta) => {
     if (!puckRef.current || !puckData || !puckData.position || !isVisualPuckInitialized.current) {
       return;
     }
 
+    const frameStartTime = performance.now();
+    const FRAME_BUDGET_MS = 12;
+
     const distanceToTarget = puckRef.current.position.distanceTo(targetPosition.current);
 
     if (distanceToTarget > SNAP_THRESHOLD) {
       puckRef.current.position.copy(targetPosition.current);
-    } else if (distanceToTarget > 0.001) { 
+    } else if (distanceToTarget > 0.0005) { // Reducido para mejor precisión
       puckRef.current.position.lerp(targetPosition.current, LERP_FACTOR);
     }
 
@@ -176,39 +176,54 @@ const Puck: React.FC<PuckProps> = ({
     const speed = Math.sqrt(puckData.velocity.x * puckData.velocity.x + puckData.velocity.z * puckData.velocity.z);
     currentSpeed.current = speed;
     
-    // Actualizar la rotación basada en la velocidad de puckData
+    // Skip expensive visual effects if frame is taking too long
+    if (performance.now() - frameStartTime > FRAME_BUDGET_MS) {
+      return;
+    }
+
+    // Actualizar la rotación basada en la velocidad y físicas mejoradas
     if (speed > 0.001) {
       const angle = Math.atan2(puckData.velocity.z, puckData.velocity.x);
-      const rotationSpeedFactor = 1.5; 
-      puckRef.current.rotation.y += speed * rotationSpeedFactor * (60 * delta); 
+      
+      // Rotación principal basada en velocidad
+      puckRef.current.rotation.y += speed * PUCK_ROTATION_SPEED_FACTOR * (60 * delta);
+      
+      // Si tenemos físicas mejoradas, usar la velocidad angular real
+      if (enhancedPhysics?.angularVelocity !== undefined) {
+        puckRef.current.rotation.y += enhancedPhysics.angularVelocity * delta;
+      }
 
-      const tiltFactor = 0.1;
-      puckRef.current.rotation.z = Math.sin(angle) * tiltFactor * speed;
-      puckRef.current.rotation.x = Math.cos(angle) * tiltFactor * speed;
+      // Check frame budget before expensive calculations
+      if (performance.now() - frameStartTime < FRAME_BUDGET_MS) {
+        // Efecto de inclinación basado en la velocidad y spin
+        const spinTiltFactor = enhancedPhysics?.spin ? Math.abs(enhancedPhysics.spin) * PUCK_SPIN_TILT_FACTOR : 0;
+        const totalTiltFactor = PUCK_TILT_BASE_FACTOR + spinTiltFactor;
+        
+        puckRef.current.rotation.z = Math.sin(angle) * totalTiltFactor * speed;
+        puckRef.current.rotation.x = Math.cos(angle) * totalTiltFactor * speed;
+        
+        // Wobble adicional para spin alto
+        if (enhancedPhysics?.spin && Math.abs(enhancedPhysics.spin) > 2) {
+          const time = Date.now() * 0.001;
+          const wobbleIntensity = Math.min(Math.abs(enhancedPhysics.spin) / 5, 1);
+          puckRef.current.rotation.z += Math.sin(time * 8) * wobbleIntensity * 0.05;
+          puckRef.current.rotation.x += Math.cos(time * 6) * wobbleIntensity * 0.03;
+        }
+      }
     } else {
-      puckRef.current.rotation.x = THREE.MathUtils.lerp(puckRef.current.rotation.x, 0, 0.1);
-      puckRef.current.rotation.z = THREE.MathUtils.lerp(puckRef.current.rotation.z, 0, 0.1);
+      // Suavizar rotación cuando se detiene
+      puckRef.current.rotation.x = THREE.MathUtils.lerp(puckRef.current.rotation.x, 0, 0.15);
+      puckRef.current.rotation.z = THREE.MathUtils.lerp(puckRef.current.rotation.z, 0, 0.15);
     }
     
-    // Efecto de destello en colisiones
-    if (Date.now() - lastCollision < 500) {
-      // const timeSinceCollision = (Date.now() - lastCollision) / 500; // Normalizado 0-1
-      // const collisionFlash = 1 - timeSinceCollision; // Decrece con el tiempo
-      
-      // if (puckRef.current.material instanceof THREE.MeshStandardMaterial) { 
-      //  puckRef.current.material.emissiveIntensity = 0.6 + collisionFlash * collisionIntensity * 3.0; 
-      // }
-    } else if (puckRef.current.material instanceof THREE.MeshStandardMaterial) {
-      // puckRef.current.material.emissiveIntensity = 0.6;
-    }
+    // Efecto de destello en colisiones (implementado en HolographicMaterial)
+    // El material holográfico maneja los efectos de colisión internamente
   });
 
   return (
     <>
-      {/* Estela visual del puck, siempre activa pero sigue a trailPosition */}
-      {/* trailPosition se actualiza incluso si el puck principal está oculto (se queda en el último sitio) */}
-      {/* o podrías condicionar el renderizado de PuckTrail también con isVisualPuckInitialized.current */}
-      {isVisualPuckInitialized.current && <PuckTrail 
+      {/* Estela visual del puck - Disabled for performance */}
+      {false && isVisualPuckInitialized.current && <PuckTrail 
         position={trailPosition.current}
         color={color}
         speed={currentSpeed.current}
@@ -228,21 +243,10 @@ const Puck: React.FC<PuckProps> = ({
       <Sphere 
         ref={puckRef}
         args={[radius, 32, 32]} 
-        // La posición y visibilidad se manejan en los hooks.
-        // Podríamos inicializarlo como no visible para evitar un flash en (0,0,0).
         visible={false} 
         castShadow
         receiveShadow
       >
-        {/* <meshStandardMaterial // <- Comentado
-          color={color} 
-          emissive={color} 
-          emissiveIntensity={0.6}
-          roughness={0.3} 
-          metalness={0.7}
-          transparent={showHitbox}
-          opacity={showHitbox ? 0.8 : 1}
-        /> */}
         <HolographicMaterial 
           hologramColor="green"
           hologramOpacity={showHitbox ? 0.8 : 1.0}
@@ -255,13 +259,14 @@ const Puck: React.FC<PuckProps> = ({
         />
       </Sphere>
       
-      {/* Luz que sigue al puck con intensidad basada en la velocidad */}
+      {/* Luz que sigue al puck con intensidad basada en la velocidad y spin */}
       {isVisualPuckInitialized.current && puckRef.current && (
         <pointLight
           position={puckRef.current.position.clone().add(new THREE.Vector3(0, 0.5, 0))}
-          intensity={1 + currentSpeed.current}
+          intensity={1 + currentSpeed.current + (enhancedPhysics?.spin ? Math.abs(enhancedPhysics.spin) * 0.3 : 0)}
           distance={3 + currentSpeed.current * 4}
-          color={color}
+          color={enhancedPhysics?.spin && Math.abs(enhancedPhysics.spin) > 1 ? 
+            `hsl(${(enhancedPhysics.spin * 30) % 360}, 70%, 60%)` : color}
         />
       )}
       
