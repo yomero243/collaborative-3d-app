@@ -12,7 +12,7 @@ export interface UserSync {
 export function useUserSync(usersMap: Y.Map<UserData> | undefined, userId: string): UserSync {
   const positionUpdateTimeoutRef = useRef<number | null>(null);
   const latestPositionToSendRef = useRef<UserData | null>(null);
-  const POSITION_UPDATE_INTERVAL = 50;
+  const POSITION_UPDATE_INTERVAL = 8; // Reduced to 8ms (~120 FPS) for ultra-responsive controls
 
   const users = useYMapValuesAsArray<UserData>(usersMap);
 

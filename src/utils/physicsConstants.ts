@@ -32,6 +32,8 @@ export const MAX_SPIN = 6.0;                 // Spin máximo
 export const INTERPOLATION_FACTOR = 0.15;    // Factor de interpolación para rendering suave
 export const COLLISION_SEPARATION = 0.005;   // Separación mínima en colisiones
 export const VELOCITY_SMOOTHING = 0.8;       // Suavizado de velocidad de paddles
+export const FRAME_RATE_TARGET = 60;         // Target frame rate for consistent updates
+export const PHYSICS_UPDATE_INTERVAL = 16.67; // Physics update interval in ms (60 FPS)
 
 // Umbrales de detección
 export const COLLISION_VELOCITY_THRESHOLD = 0.3;  // Umbral para detectar colisiones significativas

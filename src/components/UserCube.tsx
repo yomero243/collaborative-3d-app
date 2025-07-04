@@ -30,6 +30,7 @@ const UserCube: React.FC<UserCubeProps> = ({
   const targetPosition = useRef(new Vector3(initialX, initialY, initialZ));
   const lastPosition = useRef(new Vector3(initialX, initialY, initialZ));
   const velocity = useRef(new Vector3(0, 0, 0));
+  const smoothedPosition = useRef(new Vector3(initialX, initialY, initialZ));
 
   const [processedPaddleModel, setProcessedPaddleModel] = useState<THREE.Object3D | null>(null);
   const glowIntensity = useRef(2);
@@ -68,7 +69,10 @@ const UserCube: React.FC<UserCubeProps> = ({
 
   useFrame((state, delta) => {
     if (isCurrentUser && groupRef.current) {
-      groupRef.current.position.copy(targetPosition.current);
+      // Apply minimal smoothing to current user movement for maximum responsiveness
+      const smoothingFactor = 0.95; // Increased from 0.75 to 0.95 for faster tracking
+      smoothedPosition.current.lerp(targetPosition.current, smoothingFactor);
+      groupRef.current.position.copy(smoothedPosition.current);
       
       // if (delta % 0.5 < 0.016) { // Loguear aproximadamente cada 0.5 segundos
       //   console.log(`[UserCube CUR ${userData.id.substring(0,3)}] useFrame. Target:`, targetPosition.current.x.toFixed(2), targetPosition.current.z.toFixed(2), 'Actual:', groupRef.current.position.x.toFixed(2), groupRef.current.position.z.toFixed(2));
@@ -87,7 +91,7 @@ const UserCube: React.FC<UserCubeProps> = ({
         velocity.current.set(0, 0, 0);
       }
     } else if (!isCurrentUser && groupRef.current) {
-      groupRef.current.position.lerp(targetPosition.current, 0.1);
+      groupRef.current.position.lerp(targetPosition.current, 0.15); // Slightly increased for better remote user smoothness
       
       // if (delta % 0.5 < 0.016) { // Loguear aproximadamente cada 0.5 segundos
       //   console.log(`[UserCube REM ${userData.id.substring(0,3)}] useFrame. Target:`, targetPosition.current.x.toFixed(2), targetPosition.current.z.toFixed(2), 'Actual:', groupRef.current.position.x.toFixed(2), groupRef.current.position.z.toFixed(2));

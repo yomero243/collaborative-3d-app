@@ -165,6 +165,8 @@ const Scene3D: React.FC<Scene3DProps> = ({
   const tableCollisionPlane = useRef(new Plane(new Vector3(0, 1, 0), -PADDLE_MOUSE_PLANE_Y));
   const intersectionPoint = useRef(new Vector3());
   const lastMousePosition = useRef<{x: number, z: number} | null>(null);
+  const predictedPosition = useRef<{x: number, z: number} | null>(null);
+  const lastRaycastTime = useRef(0);
 
   const handlePointerMoveOnTable = (event: ThreeEvent<PointerEvent>) => {
     if (!currentUser) return;
@@ -174,18 +176,37 @@ const Scene3D: React.FC<Scene3DProps> = ({
       setIsMouseOverTable(true);
     }
     
+    const currentTime = performance.now();
+    const timeSinceLastRaycast = currentTime - lastRaycastTime.current;
+    
+    // Optimize raycasting - only perform every 4ms (~240 FPS) for maximum responsiveness
+    if (timeSinceLastRaycast < 4) {
+      // Use prediction for intermediate frames
+      if (predictedPosition.current) {
+        const newPosition = { x: predictedPosition.current.x, y: PADDLE_Y_CENTER, z: predictedPosition.current.z };
+        setOptimisticUserPosition(newPosition);
+        onUpdatePosition(newPosition);
+      }
+      return;
+    }
+    
+    lastRaycastTime.current = currentTime;
     raycasterRef.current.ray.copy(event.ray);
     if (raycasterRef.current.ray.intersectPlane(tableCollisionPlane.current, intersectionPoint.current)) {
       const halfWidth = TABLE_WIDTH / 2 - PADDLE_RADIUS;
       const halfDepth = TABLE_DEPTH / 2 - PADDLE_RADIUS;
       const clampedX = Math.max(-halfWidth, Math.min(halfWidth, intersectionPoint.current.x));
       const clampedZ = Math.max(-halfDepth, Math.min(halfDepth, intersectionPoint.current.z));
+      
+      // Ultra-sensitive threshold for movement detection
       if (lastMousePosition.current &&
-          Math.abs(lastMousePosition.current.x - clampedX) < 0.01 &&
-          Math.abs(lastMousePosition.current.z - clampedZ) < 0.01) {
+          Math.abs(lastMousePosition.current.x - clampedX) < 0.001 &&
+          Math.abs(lastMousePosition.current.z - clampedZ) < 0.001) {
         return;
       }
+      
       lastMousePosition.current = { x: clampedX, z: clampedZ };
+      predictedPosition.current = { x: clampedX, z: clampedZ };
       const newPosition = { x: clampedX, y: PADDLE_Y_CENTER, z: clampedZ };
       setOptimisticUserPosition(newPosition);
       onUpdatePosition(newPosition);
