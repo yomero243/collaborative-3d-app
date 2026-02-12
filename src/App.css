@@ -187,3 +187,44 @@ body, html {
 .player-item span {
   font-size: 0.95rem;
 }
+
+/* Mobile specific styles */
+@media (max-width: 768px) {
+  .info-panel {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    padding: 15px;
+  }
+
+  .info-panel h1 {
+    font-size: 1.2rem;
+  }
+
+  .info-panel p, .player-item span {
+    font-size: 0.85rem;
+  }
+
+  .controls {
+    flex-wrap: wrap;
+  }
+
+  .control-button {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    flex: 1;
+  }
+  
+  /* Hide instructions on very small screens to save space */
+  .instructions {
+    display: none;
+  }
+}
+
+/* Prevent scrolling on touch devices when interacting with the canvas */
+canvas {
+  touch-action: none;
+}

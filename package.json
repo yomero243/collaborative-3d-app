@@ -1,5 +1,6 @@
 {
   "name": "collaborative-3d-app",
+  "description": "Un juego de Air Hockey 3D colaborativo en tiempo real construido con React, Three.js y Yjs.",
   "private": true,
   "version": "0.0.0",
   "type": "module",

@@ -94,21 +94,21 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
 
     paddlePos.current.set(paddleUserData.position.x, PADDLE_Y_CENTER, paddleUserData.position.z);
     puckPos.current.set(puck.position.x, PUCK_Y_CENTER, puck.position.z);
-    
-    const distanceSq = (paddlePos.current.x - puckPos.current.x) ** 2 + 
-                       (paddlePos.current.z - puckPos.current.z) ** 2;
+
+    const distanceSq = (paddlePos.current.x - puckPos.current.x) ** 2 +
+      (paddlePos.current.z - puckPos.current.z) ** 2;
     const collisionThresholdSq = (PADDLE_RADIUS + PUCK_RADIUS) ** 2;
 
     if (distanceSq < collisionThresholdSq) {
       lastHitTimeRef.current = currentTime;
-      
+
       impulseDirection.current
         .subVectors(puckPos.current, paddlePos.current)
         .normalize();
-      
+
       const impulseStrength = 1.5;
       applyImpulseToPuck(
-        impulseDirection.current.x * impulseStrength, 
+        impulseDirection.current.x * impulseStrength,
         impulseDirection.current.z * impulseStrength
       );
     }
@@ -118,17 +118,17 @@ const CollisionDetector: React.FC<CollisionDetectorProps> = ({
 
 // Función para detectar si el dispositivo es móvil
 const isMobileDevice = () => {
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
     (window.innerWidth <= 768);
 };
 
-const Scene3D: React.FC<Scene3DProps> = ({ 
-  users, 
-  currentUser, 
-  puck, 
-  onUpdatePosition, 
+const Scene3D: React.FC<Scene3DProps> = ({
+  users,
+  currentUser,
+  puck,
+  onUpdatePosition,
   applyImpulseToPuck,
-  onMouseOverTable 
+  onMouseOverTable
 }) => {
   const PADDLE_Y_CENTER = TABLE_HEIGHT / 2;
   const PUCK_Y_CENTER = PUCK_RADIUS;
@@ -148,10 +148,10 @@ const Scene3D: React.FC<Scene3DProps> = ({
 
   useEffect(() => {
     if (!currentUser?.position || !currentUser.id) return;
-    
-    if (!optimisticUserPosition || 
-        Math.abs(currentUser.position.x - optimisticUserPosition.x) > 0.1 ||
-        Math.abs(currentUser.position.z - optimisticUserPosition.z) > 0.1) {
+
+    if (!optimisticUserPosition ||
+      Math.abs(currentUser.position.x - optimisticUserPosition.x) > 0.1 ||
+      Math.abs(currentUser.position.z - optimisticUserPosition.z) > 0.1) {
       setOptimisticUserPosition({
         x: currentUser.position.x,
         y: currentUser.position.y,
@@ -164,21 +164,21 @@ const Scene3D: React.FC<Scene3DProps> = ({
   const PADDLE_MOUSE_PLANE_Y = 0.0;
   const tableCollisionPlane = useRef(new Plane(new Vector3(0, 1, 0), -PADDLE_MOUSE_PLANE_Y));
   const intersectionPoint = useRef(new Vector3());
-  const lastMousePosition = useRef<{x: number, z: number} | null>(null);
-  const predictedPosition = useRef<{x: number, z: number} | null>(null);
+  const lastMousePosition = useRef<{ x: number, z: number } | null>(null);
+  const predictedPosition = useRef<{ x: number, z: number } | null>(null);
   const lastRaycastTime = useRef(0);
 
   const handlePointerMoveOnTable = (event: ThreeEvent<PointerEvent>) => {
     if (!currentUser) return;
-    
+
     // Actualizar el estado local
     if (!isMouseOverTable) {
       setIsMouseOverTable(true);
     }
-    
+
     const currentTime = performance.now();
     const timeSinceLastRaycast = currentTime - lastRaycastTime.current;
-    
+
     // Optimize raycasting - only perform every 4ms (~240 FPS) for maximum responsiveness
     if (timeSinceLastRaycast < 4) {
       // Use prediction for intermediate frames
@@ -189,7 +189,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
       }
       return;
     }
-    
+
     lastRaycastTime.current = currentTime;
     raycasterRef.current.ray.copy(event.ray);
     if (raycasterRef.current.ray.intersectPlane(tableCollisionPlane.current, intersectionPoint.current)) {
@@ -197,14 +197,14 @@ const Scene3D: React.FC<Scene3DProps> = ({
       const halfDepth = TABLE_DEPTH / 2 - PADDLE_RADIUS;
       const clampedX = Math.max(-halfWidth, Math.min(halfWidth, intersectionPoint.current.x));
       const clampedZ = Math.max(-halfDepth, Math.min(halfDepth, intersectionPoint.current.z));
-      
+
       // Ultra-sensitive threshold for movement detection
       if (lastMousePosition.current &&
-          Math.abs(lastMousePosition.current.x - clampedX) < 0.001 &&
-          Math.abs(lastMousePosition.current.z - clampedZ) < 0.001) {
+        Math.abs(lastMousePosition.current.x - clampedX) < 0.001 &&
+        Math.abs(lastMousePosition.current.z - clampedZ) < 0.001) {
         return;
       }
-      
+
       lastMousePosition.current = { x: clampedX, z: clampedZ };
       predictedPosition.current = { x: clampedX, z: clampedZ };
       const newPosition = { x: clampedX, y: PADDLE_Y_CENTER, z: clampedZ };
@@ -213,7 +213,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
     }
   };
 
-  const handlePointerLeaveTable = () => { 
+  const handlePointerLeaveTable = () => {
     // Actualizar el estado local
     setIsMouseOverTable(false);
   };
@@ -223,12 +223,12 @@ const Scene3D: React.FC<Scene3DProps> = ({
       // Verificar si el mouse está fuera del canvas
       const canvas = document.querySelector('canvas');
       if (!canvas) return;
-      
+
       const rect = canvas.getBoundingClientRect();
       if (
-        e.clientX < rect.left || 
-        e.clientX > rect.right || 
-        e.clientY < rect.top || 
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
         e.clientY > rect.bottom
       ) {
         if (isMouseOverTable) {
@@ -236,9 +236,9 @@ const Scene3D: React.FC<Scene3DProps> = ({
         }
       }
     };
-    
+
     window.addEventListener('mousemove', handleGlobalMouseMove);
-    
+
     return () => {
       window.removeEventListener('mousemove', handleGlobalMouseMove);
     };
@@ -248,17 +248,17 @@ const Scene3D: React.FC<Scene3DProps> = ({
     if (!currentUser || !optimisticUserPosition) {
       return users;
     }
-    
+
     const currentUserData = users.get(currentUser.id);
     if (!currentUserData) {
       return users;
     }
-    
+
     if (Math.abs(currentUserData.position.x - optimisticUserPosition.x) < 0.001 &&
-        Math.abs(currentUserData.position.z - optimisticUserPosition.z) < 0.001) {
+      Math.abs(currentUserData.position.z - optimisticUserPosition.z) < 0.001) {
       return users;
     }
-    
+
     const newOptimisticUsers = new Map(users);
     newOptimisticUsers.set(currentUser.id, {
       ...currentUserData,
@@ -273,7 +273,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
     const handleResize = () => {
       setIsMobile(isMobileDevice());
     };
-    
+
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -285,6 +285,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
       <Canvas
         camera={{ position: [0, TABLE_DEPTH * 0.8, TABLE_DEPTH * 1.2], fov: 60 }}
         shadows
+        style={{ touchAction: 'none' }}
       >
         <OrbitControls
           enableDamping
@@ -316,12 +317,12 @@ const Scene3D: React.FC<Scene3DProps> = ({
         <pointLight position={[-TABLE_WIDTH - 0.5, 1, 0]} intensity={1} distance={3} color="red" />
         <pointLight position={[TABLE_WIDTH + 0.5, 1, 0]} intensity={1} distance={3} color="blue" />
         <Environment preset="sunset" />
-        <TileFloor 
-          size={40} 
-          position={[0, -2.2, 0]} 
-          tileSize={2.5} 
-          color1="#1a1a2e" 
-          color2="#303045" 
+        <TileFloor
+          size={40}
+          position={[0, -2.2, 0]}
+          tileSize={2.5}
+          color1="#1a1a2e"
+          color2="#303045"
           glowColor="#4158D0"
           glowIntensity={0.3}
         />

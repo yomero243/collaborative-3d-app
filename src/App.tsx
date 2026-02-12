@@ -10,8 +10,9 @@ function GameComponent() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [userScore, setUserScore] = useState<number>(0)
   const [isMouseOverTable, setIsMouseOverTable] = useState(false)
-  
-  const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, yDoc, updateUserName } = useCollaborativeState(
+  const [isInfoPanelVisible, setIsInfoPanelVisible] = useState(true)
+
+  const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, yDoc, updateUserName, isConnected } = useCollaborativeState(
     "air-hockey-app",
     "ws://localhost:1234"
   )
@@ -59,22 +60,30 @@ function GameComponent() {
     return map
   }, [users, adaptUserToScene])
 
-  const sceneCurrentUser = useMemo(() => 
+  const sceneCurrentUser = useMemo(() =>
     currentUserInHook ? adaptUserToScene(currentUserInHook) : null,
     [currentUserInHook, adaptUserToScene]
   )
 
-  const scenePuck = useMemo(() => 
+  const scenePuck = useMemo(() =>
     adaptPuckToScene(puck),
     [puck, adaptPuckToScene]
   )
 
   return (
     <div className="app">
-      <div className={`info-panel ${isMouseOverTable ? 'info-panel-hidden' : ''}`}>
+      <div className={`info-panel ${isMouseOverTable ? 'info-panel-hidden' : ''} ${!isInfoPanelVisible ? 'hidden-mobile' : ''}`}>
         <div className="flex justify-between items-center mb-4">
           <h1>Air Hockey 3D</h1>
-          <ExitButton className="ml-4" />
+          <div className="flex gap-2">
+            <button
+              className="md:hidden text-white border border-white rounded px-2 py-1 text-xs"
+              onClick={() => setIsInfoPanelVisible(false)}
+            >
+              Ocultar
+            </button>
+            <ExitButton className="ml-4" />
+          </div>
         </div>
         {sceneCurrentUser && (
           <>
@@ -83,7 +92,7 @@ function GameComponent() {
           </>
         )}
         <p>Usuarios conectados: {users.length}</p>
-        
+
         <div className="players-list">
           <h2 className="text-lg font-semibold mb-2">Jugadores:</h2>
           {users.map(user => (
@@ -100,7 +109,7 @@ function GameComponent() {
           <br />
           ¡Intenta golpear el puck para mandarlo a la meta rival!
         </p>
-        
+
         <div className="controls">
           <button onClick={resetPuck} className="control-button">
             Reiniciar Puck
@@ -111,14 +120,14 @@ function GameComponent() {
         </div>
 
         <div className="server-status">
-          <div className={`status-indicator ${puck ? 'connected' : 'disconnected'}`}></div>
-          <span>{puck ? 'Conectado' : 'Desconectado'}</span>
+          <div className={`status-indicator ${isConnected ? 'connected' : 'disconnected'}`}></div>
+          <span>{isConnected ? 'Conectado' : 'Desconectado (Servidor no iniciado)'}</span>
         </div>
       </div>
-      
-      <Scene3D 
-        users={usersMapForScene} 
-        currentUser={sceneCurrentUser} 
+
+      <Scene3D
+        users={usersMapForScene}
+        currentUser={sceneCurrentUser}
         puck={scenePuck}
         onUpdatePosition={handleUpdatePosition}
         applyImpulseToPuck={applyImpulseToPuck}
@@ -145,12 +154,12 @@ const NameEntry = () => {
     return <Navigate to="/game" replace />;
   }
   return (
-    <UserNameForm 
-      initialName="" 
+    <UserNameForm
+      initialName=""
       onSubmit={(name) => {
         localStorage.setItem('userName', name);
         navigate('/game');
-      }} 
+      }}
     />
   );
 };
