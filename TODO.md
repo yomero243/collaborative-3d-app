@@ -22,4 +22,5 @@ Estas son las áreas identificadas para futuras mejoras en el proyecto. ¡Siént
 
 ## 🔧 Optimización y Código
 - [ ] **Interpolación de Lag:** Refinar la interpolación de los movimientos de los oponentes remotos para suavizar aún más la experiencia en redes lentas.
-- [ ] **Tests Unitarios:** Aumentar la cobertura de tests, especialmente para el motor de físicas (`src/physics/PhysicsEngine.ts`).
+- [x] **Tests Unitarios:** Suite con Vitest (`npm test`): cobertura de `mathUtils`, `puckSimulation` (fricción, rebotes, goles, golpes de paddle) y `PhysicsEngine` (paredes, colisiones, límites de velocidad).
+- [ ] **Ampliar cobertura de tests:** Hooks de React (`usePuckPhysics`, `useUserSync`) con renderizado simulado.

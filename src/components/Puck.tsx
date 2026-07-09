@@ -25,66 +25,6 @@ interface PuckProps {
   };
 }
 
-// Componente para crear la estela visual del puck
-const PuckTrail: React.FC<{position: THREE.Vector3, color: string, speed: number}> = ({ position, color, speed }) => {
-  const particles = useRef<THREE.Points>(null);
-  const particleCount = 10;
-  const positions = useRef<number[]>([]);
-  
-  // Crear geometría de partículas
-  useEffect(() => {
-    positions.current = Array(particleCount * 3).fill(0);
-  }, []);
-  
-  useFrame(() => {
-    if (!particles.current || speed < 0.5) return;
-    
-    const frameStart = performance.now();
-    if (frameStart % 2 !== 0) return; // Skip every other frame
-    
-    // Actualizar posiciones de partículas
-    for (let i = positions.current.length - 3; i >= 3; i -= 3) {
-      positions.current[i] = positions.current[i - 3];
-      positions.current[i + 1] = positions.current[i - 2];
-      positions.current[i + 2] = positions.current[i - 1];
-    }
-    
-    positions.current[0] = position.x;
-    positions.current[1] = position.y;
-    positions.current[2] = position.z;
-    
-    const geometry = particles.current.geometry as THREE.BufferGeometry;
-    const positionAttribute = geometry.getAttribute('position');
-    const typedArray = positionAttribute.array as Float32Array;
-    
-    for (let i = 0; i < positions.current.length; i++) {
-      typedArray[i] = positions.current[i];
-    }
-    
-    positionAttribute.needsUpdate = true;
-  });
-  
-  return (
-    <points ref={particles}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={particleCount}
-          array={new Float32Array(particleCount * 3)}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <pointsMaterial
-        color={color}
-        size={0.08 + (speed * 0.1)}
-        sizeAttenuation={true}
-        transparent={true}
-        opacity={0.8}
-      />
-    </points>
-  );
-};
-
 const Puck: React.FC<PuckProps> = ({
   puckData,
   radius = 0.25,
@@ -99,8 +39,6 @@ const Puck: React.FC<PuckProps> = ({
   
   // Posición a la que el puck visual debe moverse (viene de puckData)
   const targetPosition = useRef(new THREE.Vector3());
-  // Posición usada por PuckTrail, actualizada con la posición visual actual del puck
-  const trailPosition = useRef(new THREE.Vector3()); 
   // Velocidad actual para efectos visuales
   const currentSpeed = useRef(0);
 
@@ -133,7 +71,6 @@ const Puck: React.FC<PuckProps> = ({
         // Primera vez que tenemos datos válidos, o si se reinicializa,
         // teletransportar el puck visual a la posición objetivo.
         puckRef.current.position.copy(targetPosition.current);
-        trailPosition.current.copy(targetPosition.current); // Sincronizar la estela también
         lastPositionRef.current.copy(targetPosition.current); // Guardar última posición
         isVisualPuckInitialized.current = true;
         puckRef.current.visible = true; // Asegurarse que esté visible
@@ -166,8 +103,6 @@ const Puck: React.FC<PuckProps> = ({
       puckRef.current.position.lerp(targetPosition.current, LERP_FACTOR);
     }
 
-    trailPosition.current.copy(puckRef.current.position);
-    
     // Sincronizar la posición del hitbox con la del puck en cada frame
     if (hitboxRef.current && showHitbox) {
       hitboxRef.current.position.copy(puckRef.current.position);
@@ -222,13 +157,6 @@ const Puck: React.FC<PuckProps> = ({
 
   return (
     <>
-      {/* Estela visual del puck - Disabled for performance */}
-      {false && isVisualPuckInitialized.current && <PuckTrail 
-        position={trailPosition.current}
-        color={color}
-        speed={currentSpeed.current}
-      />}
-      
       {/* Visualización de hitbox del puck */}
       {showHitbox && isVisualPuckInitialized.current && (
         <Sphere

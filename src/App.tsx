@@ -7,12 +7,10 @@ import { ExitButton } from './components/ExitButton'
 import { useCollaborativeState, UserData, PuckState } from './hooks/useCollaborativeState'
 
 function GameComponent() {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [userScore, setUserScore] = useState<number>(0)
   const [isMouseOverTable, setIsMouseOverTable] = useState(false)
   const [isInfoPanelVisible, setIsInfoPanelVisible] = useState(true)
 
-  const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, yDoc, updateUserName, isConnected } = useCollaborativeState(
+  const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, hitPuckWithPaddle, yDoc, updateUserName, isConnected } = useCollaborativeState(
     "air-hockey-app",
     "ws://localhost:1234"
   )
@@ -24,8 +22,8 @@ function GameComponent() {
     name: user.userName,
     color: user.color,
     position: { x: user.x, y: 0.1, z: user.y },
-    score: userScore,
-  }), [userScore])
+    score: user.score ?? 0,
+  }), [])
 
   const adaptPuckToScene = useCallback((puckState: PuckState | null): ScenePuckData | null => {
     if (!puckState) return null
@@ -42,7 +40,7 @@ function GameComponent() {
   const resetPuck = useCallback(() => {
     if (!yDoc) return
     const puckMap = yDoc.getMap('puck')
-    puckMap.set('state', { x: 0, y: 0, vx: 0, vy: 0 })
+    puckMap.set('state', { x: 0, y: 0, vx: 0, vy: 0, lastUpdate: Date.now() })
   }, [yDoc])
 
   useEffect(() => {
@@ -100,6 +98,7 @@ function GameComponent() {
               <span style={{ color: user.color }}>
                 {user.userName} {user.id === userId ? '(Tú)' : ''}
               </span>
+              <span> — {user.score ?? 0} pts</span>
             </div>
           ))}
         </div>
@@ -130,7 +129,7 @@ function GameComponent() {
         currentUser={sceneCurrentUser}
         puck={scenePuck}
         onUpdatePosition={handleUpdatePosition}
-        applyImpulseToPuck={applyImpulseToPuck}
+        hitPuckWithPaddle={hitPuckWithPaddle}
         onMouseOverTable={setIsMouseOverTable}
       />
     </div>

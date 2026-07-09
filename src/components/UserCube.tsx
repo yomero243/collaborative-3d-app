@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { Mesh, Vector3, Group } from 'three';
 import * as THREE from 'three';
 import { UserData } from '../components/Scene3D';
+import { PADDLE_HITBOX_MULTIPLIER } from '../utils/physicsConstants';
 
 interface UserCubeProps {
   userData: UserData;
@@ -117,7 +118,7 @@ const UserCube: React.FC<UserCubeProps> = ({
       <Cylinder
         ref={hitboxRef}
         position={[0, 0, 0]}
-        args={[paddleRadius * 1.15, paddleRadius * 1.15, paddleRadius * 1.5, 32]}
+        args={[paddleRadius * PADDLE_HITBOX_MULTIPLIER, paddleRadius * PADDLE_HITBOX_MULTIPLIER, paddleRadius * 1.5, 32]}
         rotation={[Math.PI / 2, 0, 0]}
         visible={showHitbox}
       >

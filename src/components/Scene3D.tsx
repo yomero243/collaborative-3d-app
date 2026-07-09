@@ -12,7 +12,11 @@ import {
   PADDLE_RADIUS,
   PUCK_RADIUS,
   TABLE_HEIGHT,
+  PADDLE_HITBOX_MULTIPLIER,
+  PADDLE_HIT_COOLDOWN_MS,
+  GOAL_WIDTH,
 } from '../utils/physicsConstants';
+import { PaddleHitInput } from '../hooks/puckSimulation';
 
 export interface UserData {
   id: string;
@@ -32,7 +36,7 @@ interface Scene3DProps {
   currentUser: UserData | null;
   puck: PuckData | null;
   onUpdatePosition: (position: { x: number; y: number; z: number }) => void;
-  applyImpulseToPuck: (vx: number, vy: number) => void;
+  hitPuckWithPaddle: (paddle: PaddleHitInput, hitBy: string) => boolean;
   onMouseOverTable?: (isOver: boolean) => void;
 }
 
@@ -40,77 +44,72 @@ interface CollisionDetectorProps {
   currentUser: UserData | null;
   puck: PuckData | null;
   optimisticUsers: Map<string, UserData>;
-  applyImpulseToPuck: (vx: number, vy: number) => void;
-  PADDLE_RADIUS: number;
-  PUCK_RADIUS: number;
-  PADDLE_Y_CENTER: number;
-  PUCK_Y_CENTER: number;
+  hitPuckWithPaddle: (paddle: PaddleHitInput, hitBy: string) => boolean;
   lastHitTimeRef: React.MutableRefObject<number>;
-  HIT_COOLDOWN: number;
 }
 
 // Umbral para la fase amplia de detección de colisiones (distancia al cuadrado)
 // Si el puck y la paleta están más lejos que esto (aproximadamente), no se procesa la colisión detallada.
-// (PADDLE_RADIUS + PUCK_RADIUS + buffer)^2 = (0.5 + 0.25 + 1.5)^2 = 2.25^2 = 5.0625
-const BROAD_PHASE_THRESHOLD_SQ = (0.5 + 0.25 + 1.5) ** 2;
+const BROAD_PHASE_THRESHOLD_SQ = (PADDLE_RADIUS * PADDLE_HITBOX_MULTIPLIER + PUCK_RADIUS + 1.5) ** 2;
+
+// Suavizado exponencial de la velocidad estimada del paddle
+const PADDLE_VELOCITY_SMOOTHING = 0.5;
 
 const CollisionDetector: React.FC<CollisionDetectorProps> = ({
   currentUser,
   puck,
   optimisticUsers,
-  applyImpulseToPuck,
-  PADDLE_RADIUS,
-  PUCK_RADIUS,
-  PADDLE_Y_CENTER,
-  PUCK_Y_CENTER,
+  hitPuckWithPaddle,
   lastHitTimeRef,
-  HIT_COOLDOWN,
 }) => {
-  const paddlePos = useRef(new Vector3());
-  const puckPos = useRef(new Vector3());
-  const impulseDirection = useRef(new Vector3());
+  const lastPaddlePos = useRef<{ x: number; z: number } | null>(null);
+  const paddleVelocity = useRef({ x: 0, z: 0 });
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!currentUser || !puck || !puck.position) {
       return;
     }
     const paddleUserData = optimisticUsers.get(currentUser.id);
     if (!paddleUserData || !paddleUserData.position) return;
 
-    // --- Inicio de la Fase Amplia (Broad-phase) ---
-    const dxBroad = paddleUserData.position.x - puck.position.x;
-    const dzBroad = paddleUserData.position.z - puck.position.z;
-    const distanceSqBroad = dxBroad * dxBroad + dzBroad * dzBroad;
+    const paddleX = paddleUserData.position.x;
+    const paddleZ = paddleUserData.position.z;
 
-    if (distanceSqBroad > BROAD_PHASE_THRESHOLD_SQ) {
-      return; // Puck demasiado lejos, no hay necesidad de comprobar colisión detallada o cooldown
+    // Estimar la velocidad del paddle a partir del cambio de posición entre frames
+    if (lastPaddlePos.current && delta > 0) {
+      const rawVx = (paddleX - lastPaddlePos.current.x) / delta;
+      const rawVz = (paddleZ - lastPaddlePos.current.z) / delta;
+      paddleVelocity.current.x += (rawVx - paddleVelocity.current.x) * PADDLE_VELOCITY_SMOOTHING;
+      paddleVelocity.current.z += (rawVz - paddleVelocity.current.z) * PADDLE_VELOCITY_SMOOTHING;
     }
-    // --- Fin de la Fase Amplia ---
+    lastPaddlePos.current = { x: paddleX, z: paddleZ };
 
-    const currentTime = Date.now();
-    if (currentTime - lastHitTimeRef.current < HIT_COOLDOWN) {
+    // --- Fase amplia: descartar si el puck está lejos ---
+    const dxBroad = paddleX - puck.position.x;
+    const dzBroad = paddleZ - puck.position.z;
+    if (dxBroad * dxBroad + dzBroad * dzBroad > BROAD_PHASE_THRESHOLD_SQ) {
       return;
     }
 
-    paddlePos.current.set(paddleUserData.position.x, PADDLE_Y_CENTER, paddleUserData.position.z);
-    puckPos.current.set(puck.position.x, PUCK_Y_CENTER, puck.position.z);
+    const currentTime = Date.now();
+    if (currentTime - lastHitTimeRef.current < PADDLE_HIT_COOLDOWN_MS) {
+      return;
+    }
 
-    const distanceSq = (paddlePos.current.x - puckPos.current.x) ** 2 +
-      (paddlePos.current.z - puckPos.current.z) ** 2;
-    const collisionThresholdSq = (PADDLE_RADIUS + PUCK_RADIUS) ** 2;
+    // La resolución detallada (normal, reflexión, transferencia de velocidad
+    // y separación) vive en computePaddleHit; aquí solo se dispara.
+    const hit = hitPuckWithPaddle(
+      {
+        x: paddleX,
+        y: paddleZ,
+        vx: paddleVelocity.current.x,
+        vy: paddleVelocity.current.z,
+      },
+      currentUser.id
+    );
 
-    if (distanceSq < collisionThresholdSq) {
+    if (hit) {
       lastHitTimeRef.current = currentTime;
-
-      impulseDirection.current
-        .subVectors(puckPos.current, paddlePos.current)
-        .normalize();
-
-      const impulseStrength = 1.5;
-      applyImpulseToPuck(
-        impulseDirection.current.x * impulseStrength,
-        impulseDirection.current.z * impulseStrength
-      );
     }
   });
   return null;
@@ -127,14 +126,13 @@ const Scene3D: React.FC<Scene3DProps> = ({
   currentUser,
   puck,
   onUpdatePosition,
-  applyImpulseToPuck,
+  hitPuckWithPaddle,
   onMouseOverTable
 }) => {
   const PADDLE_Y_CENTER = TABLE_HEIGHT / 2;
   const PUCK_Y_CENTER = PUCK_RADIUS;
 
   const lastHitTimeRef = useRef(0);
-  const HIT_COOLDOWN = 250;
   const [isMobile, setIsMobile] = useState(isMobileDevice());
 
   const [optimisticUserPosition, setOptimisticUserPosition] = useState<{ x: number; y: number; z: number } | null>(null);
@@ -356,17 +354,30 @@ const Scene3D: React.FC<Scene3DProps> = ({
           />
         ))}
 
+        {/* Marcadores de las porterías en los extremos de la mesa */}
+        {[-1, 1].map((side) => (
+          <mesh
+            key={`goal-${side}`}
+            position={[side * (TABLE_WIDTH / 2), PUCK_Y_CENTER, 0]}
+          >
+            <boxGeometry args={[0.12, 0.35, GOAL_WIDTH]} />
+            <meshStandardMaterial
+              color="#111111"
+              emissive={side < 0 ? '#ff3355' : '#3366ff'}
+              emissiveIntensity={1.4}
+              transparent
+              opacity={0.75}
+              toneMapped={false}
+            />
+          </mesh>
+        ))}
+
         <CollisionDetector
           currentUser={currentUser}
           puck={puck}
           optimisticUsers={optimisticUsers}
-          applyImpulseToPuck={applyImpulseToPuck}
-          PADDLE_RADIUS={PADDLE_RADIUS}
-          PUCK_RADIUS={PUCK_RADIUS}
-          PADDLE_Y_CENTER={PADDLE_Y_CENTER}
-          PUCK_Y_CENTER={PUCK_Y_CENTER}
+          hitPuckWithPaddle={hitPuckWithPaddle}
           lastHitTimeRef={lastHitTimeRef}
-          HIT_COOLDOWN={HIT_COOLDOWN}
         />
       </Canvas>
     </div>

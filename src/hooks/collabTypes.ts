@@ -5,6 +5,7 @@ export interface UserData {
   color: string;
   userName: string;
   lastUpdate: number;
+  score?: number;
 }
 
 export interface PuckState {

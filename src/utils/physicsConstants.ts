@@ -35,6 +35,16 @@ export const VELOCITY_SMOOTHING = 0.8;       // Suavizado de velocidad de paddle
 export const FRAME_RATE_TARGET = 60;         // Target frame rate for consistent updates
 export const PHYSICS_UPDATE_INTERVAL = 16.67; // Physics update interval in ms (60 FPS)
 
+// Colisión paddle-puck (lado cliente)
+export const PADDLE_HITBOX_MULTIPLIER = 1.15;   // El hitbox visual del paddle es 15% mayor que su radio
+export const PADDLE_HIT_COOLDOWN_MS = 100;      // Tiempo mínimo entre golpes del mismo paddle
+export const PADDLE_VELOCITY_TRANSFER = 0.65;   // Fracción de la velocidad del paddle transferida al puck
+export const MIN_HIT_SPEED = 2.0;               // Velocidad mínima de salida del puck tras un golpe
+export const PADDLE_HIT_SEPARATION = 0.02;      // Margen extra al separar puck y paddle tras un golpe
+
+// Porterías (aberturas centradas en los lados cortos, x = ±TABLE_WIDTH/2)
+export const GOAL_WIDTH = 2.0;
+
 // Umbrales de detección
 export const COLLISION_VELOCITY_THRESHOLD = 0.3;  // Umbral para detectar colisiones significativas
 export const HIGH_SPEED_THRESHOLD = 5.0;          // Umbral de alta velocidad para efectos visuales

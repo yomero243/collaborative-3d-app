@@ -165,14 +165,14 @@ export class PhysicsEngine {
     paddles.forEach(paddle => {
       // Calcular velocidad basada en cambio de posición
       const positionDelta = vec2.subtract(paddle.position, paddle.lastPosition);
-      paddle.playerVelocity = vec2.multiply(positionDelta, 1 / deltaTime);
-      
-      // Suavizar la velocidad para evitar saltos bruscos
-      paddle.playerVelocity = vec2.lerp(paddle.velocity, paddle.playerVelocity, VELOCITY_SMOOTHING);
-      
+      const rawVelocity = vec2.multiply(positionDelta, 1 / deltaTime);
+
+      // Suavizar contra la velocidad previa del jugador para evitar saltos bruscos
+      paddle.playerVelocity = vec2.lerp(paddle.playerVelocity, rawVelocity, VELOCITY_SMOOTHING);
+
       // Actualizar última posición
       paddle.lastPosition = vec2.copy(paddle.position);
-      
+
       // Los paddles no tienen velocidad propia en el sistema de físicas (son controlados por el jugador)
       paddle.velocity = vec2.create(0, 0);
     });
@@ -289,23 +289,21 @@ export class PhysicsEngine {
   
   private checkWallCollisions(puck: PuckPhysics): CollisionInfo {
     for (const wall of this.walls) {
-      // Calcular distancia del puck a la pared
-      const distanceToWall = Math.abs(vec2.dot(puck.position, wall.normal)) - wall.distance;
-      
-      if (distanceToWall > -puck.radius) {
-        const penetration = puck.radius - distanceToWall;
-        
-        if (penetration > 0) {
-          return {
-            occurred: true,
-            point: vec2.subtract(puck.position, vec2.multiply(wall.normal, puck.radius)),
-            normal: vec2.copy(wall.normal),
-            penetration,
-            relativeVelocity: vec2.copy(puck.velocity),
-            impulse: vec2.create(0, 0),
-            force: 0
-          };
-        }
+      // Distancia con signo desde el centro del puck al plano de la pared,
+      // medida a lo largo de la normal (positiva hacia el interior de la mesa).
+      const signedDistance = vec2.dot(puck.position, wall.normal) + wall.distance;
+      const penetration = puck.radius - signedDistance;
+
+      if (penetration > 0) {
+        return {
+          occurred: true,
+          point: vec2.subtract(puck.position, vec2.multiply(wall.normal, puck.radius)),
+          normal: vec2.copy(wall.normal),
+          penetration,
+          relativeVelocity: vec2.copy(puck.velocity),
+          impulse: vec2.create(0, 0),
+          force: 0
+        };
       }
     }
     

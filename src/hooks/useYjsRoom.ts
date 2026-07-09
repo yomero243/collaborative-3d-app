@@ -39,6 +39,8 @@ export function useYjsRoom(roomName: string, serverUrl: string): YjsRoom {
   const usersMapRef = useRef<Y.Map<UserData>>();
   const puckMapRef = useRef<Y.Map<unknown>>();
   const hasLoggedErrorRef = useRef(false);
+  // Última copia conocida de nuestros datos, para re-crear la entrada si otro cliente la borra
+  const lastOwnDataRef = useRef<UserData | null>(null);
 
   useEffect(() => {
     let cleanupInterval: number | null = null;
@@ -80,9 +82,21 @@ export function useYjsRoom(roomName: string, serverUrl: string): YjsRoom {
       cleanupInterval = setInterval(() => {
         if (usersMapRef.current && provider.wsconnected) {
           const now = Date.now();
+
+          // Heartbeat: refrescar el lastUpdate propio para que otros clientes
+          // no nos eliminen por inactividad (quedarse quieto no es desconectarse).
+          // Si nuestra entrada fue borrada (p. ej. por otro cliente), se re-crea.
+          const ownData = usersMapRef.current.get(userId) ?? lastOwnDataRef.current;
+          if (ownData) {
+            const refreshed = { ...ownData, lastUpdate: now };
+            lastOwnDataRef.current = refreshed;
+            usersMapRef.current.set(userId, refreshed);
+          }
+
+          // Eliminar solo a OTROS usuarios cuyo heartbeat dejó de llegar
           const users = Array.from(usersMapRef.current.values());
           users.forEach(user => {
-            if (user.lastUpdate && now - user.lastUpdate > 10000) {
+            if (user.id !== userId && user.lastUpdate && now - user.lastUpdate > 10000) {
               usersMapRef.current?.delete(user.id);
             }
           });
@@ -100,10 +114,12 @@ export function useYjsRoom(roomName: string, serverUrl: string): YjsRoom {
         y: -3 + PADDLE_RADIUS + 0.5,
         color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`,
         userName: localStorage.getItem('userName') || 'Player',
-        lastUpdate: Date.now()
+        lastUpdate: Date.now(),
+        score: 0
       };
 
       if (usersMapRef.current) {
+        lastOwnDataRef.current = initialUserData;
         usersMapRef.current.set(userId, initialUserData);
         setIsInitialUserSet(true);
       }

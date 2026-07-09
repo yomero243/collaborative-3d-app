@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useYjsRoom } from './useYjsRoom';
 import { useUserSync } from './useUserSync';
 import { usePuckPhysics } from './usePuckPhysics';
+import { GoalSide } from './puckSimulation';
 
 export type { UserData, PuckState } from './collabTypes';
 
@@ -20,7 +21,24 @@ export function useCollaborativeState(
     return sorted[0].id === userId;
   }, [users, userId, isInitialUserSet]);
 
-  const { puck, applyImpulseToPuck } = usePuckPhysics(puckMap, amIHost);
+  // El host acredita el gol al último jugador que tocó el puck
+  const handleGoal = useCallback(
+    (scorerId: string | undefined, _side: GoalSide) => {
+      void _side;
+      if (!scorerId || !usersMap) return;
+      const scorer = usersMap.get(scorerId);
+      if (scorer) {
+        usersMap.set(scorerId, {
+          ...scorer,
+          score: (scorer.score ?? 0) + 1,
+          lastUpdate: Date.now(),
+        });
+      }
+    },
+    [usersMap]
+  );
+
+  const { puck, applyImpulseToPuck, hitPuckWithPaddle } = usePuckPhysics(puckMap, amIHost, handleGoal);
 
   return {
     users,
@@ -29,6 +47,7 @@ export function useCollaborativeState(
     yDoc,
     updateCurrentUserPosition,
     applyImpulseToPuck,
+    hitPuckWithPaddle,
     updateUserName,
     isConnected,
   };
