@@ -6,13 +6,23 @@ import UserNameForm from './components/UserNameForm'
 import { ExitButton } from './components/ExitButton'
 import { useCollaborativeState, UserData, PuckState } from './hooks/useCollaborativeState'
 
+// URL del servidor de sincronización, en orden de prioridad:
+// 1. VITE_WS_URL (variable de entorno en build)
+// 2. En desarrollo: el servidor local de y-websocket
+// 3. En producción: el mismo host que sirve la página (server.cjs sirve ambos)
+const WS_URL: string =
+  import.meta.env.VITE_WS_URL ??
+  (import.meta.env.DEV
+    ? 'ws://localhost:1234'
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`)
+
 function GameComponent() {
   const [isMouseOverTable, setIsMouseOverTable] = useState(false)
   const [isInfoPanelVisible, setIsInfoPanelVisible] = useState(true)
 
   const { users, puck, userId, updateCurrentUserPosition, applyImpulseToPuck, hitPuckWithPaddle, yDoc, updateUserName, isConnected } = useCollaborativeState(
     "air-hockey-app",
-    "ws://localhost:1234"
+    WS_URL
   )
 
   const currentUserInHook = useMemo(() => users.find(user => user.id === userId) || null, [users, userId])
